@@ -25,15 +25,16 @@ type Check = { label: string; mapillaryValues: string[]; matchRadiusM: number };
 
 const CHECKS: Record<RoadFeatureKind, Check> = {
   stop: { label: 'stop sign', mapillaryValues: ['regulatory--stop--g1', 'regulatory--stop--g2'], matchRadiusM: 25 },
-  // OSM usually puts the signal node at the intersection centre while the lights
-  // hang on the far side or on mast arms, so allow a whole intersection's width.
   // Vehicle signals only: pedestrian and cyclist signals are left out.
+  // Downtown Raleigh (tile 2472:-4408): real OSM lights sat a median 4 m from a
+  // detection (98% within 15 m), but points moved 150 m away still hit one 33%
+  // of the time at 40 m, so keep the radius tight.
   traffic_signals: {
     label: 'traffic light',
     mapillaryValues: ['upright', 'horizontal', 'single'].flatMap((shape) =>
       ['', '-front', '-side', '-back'].map((view) => `object--traffic-light--general-${shape}${view}`),
     ),
-    matchRadiusM: 40,
+    matchRadiusM: 20,
   },
 };
 
