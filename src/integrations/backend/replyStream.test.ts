@@ -96,3 +96,40 @@ describe('parsePacket', () => {
     for (const bad of ['null', '5', '"x"', '{"type":"sentence"}', '{"type":"sentence","i":"0","text":"a"}']) expect(parsePacket(bad)).toBeNull();
   });
 });
+
+
+describe('review fix: stalls time out, slow speaking does not', () => {
+  function trickle(packets: Uint8Array[], holdAfter: number) {
+    // sends `holdAfter` packets, then goes silent forever (lost signal) until aborted
+    return (async (_u: string, init: RequestInit) => {
+      const signal = init.signal as AbortSignal;
+      let i = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(c) {
+          if (i < holdAfter) return c.enqueue(packets[i++]!);
+          return new Promise<void>((_r, rej) => signal.addEventListener('abort', () => rej(new Error('aborted')), { once: true }));
+        },
+      });
+      return new Response(body);
+    }) as unknown as typeof fetch;
+  }
+  const p = (i: number) => enc.encode(line({ type: 'sentence', i, text: `Sentence ${i}.`, audio: null, ms: i }));
+
+  it('gives up when the connection goes quiet after the first sentence', async () => {
+    const got: ReplyPacket[] = [];
+    const run = (async () => {
+      for await (const x of streamReply({ baseUrl: 'http://x', body: {}, fetchImpl: trickle([p(0), p(1)], 1), stallTimeoutMs: 30 })) got.push(x);
+    })();
+    await expect(run).rejects.toThrow('aborted');
+    expect(got).toHaveLength(1);
+  });
+
+  it('does not abort while the consumer takes a long time to speak a sentence', async () => {
+    const got: ReplyPacket[] = [];
+    for await (const x of streamReply({ baseUrl: 'http://x', body: {}, fetchImpl: fetchOf([p(0), p(1), enc.encode(line({ type: 'done', ms: 9 }))]).impl, stallTimeoutMs: 20 })) {
+      got.push(x);
+      await new Promise((r) => setTimeout(r, 60)); // speaking takes 3x the stall timeout
+    }
+    expect(got.map((x) => x.type)).toEqual(['sentence', 'sentence', 'done']);
+  });
+});

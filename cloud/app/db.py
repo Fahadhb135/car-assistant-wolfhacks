@@ -76,3 +76,7 @@ class TripStore:
     def load_hotspots(self) -> Optional[dict]:
         row = self.conn.execute("SELECT payload FROM hotspot_snapshot WHERE id=1").fetchone()
         return json.loads(row[0]) if row else None
+
+    def clear_hotspots(self) -> None:
+        self.conn.execute("DELETE FROM hotspot_snapshot")
+        self.conn.commit()

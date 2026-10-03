@@ -40,21 +40,27 @@ export function useReplayDrive(
     // Fix times follow the real clock so the voice queue's staleness rules behave as in a live drive.
     const fixes = replayFixes(undefined, Date.now());
     let i = 0;
-    const timer = setInterval(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    // Load the bundled map tile first so the opening stop sign is not missed.
+    void session.prime(fixes[0]!).catch((err) => console.warn('[replay]', err)).finally(() => {
       if (cancelled) return;
-      const fix = fixes[i++];
-      if (!fix) {
-        clearInterval(timer);
-        setFinished(true);
-        setCoach(FINISHED);
-        return;
-      }
-      void session.onFix(fix).catch((err) => console.warn('[replay]', err));
-    }, 1000);
+      timer = setInterval(() => {
+        if (cancelled) return;
+        const fix = fixes[i++];
+        if (!fix) {
+          if (timer) clearInterval(timer);
+          if (calmTimer.current) clearTimeout(calmTimer.current); // keep "Replay finished" on screen
+          setFinished(true);
+          setCoach(FINISHED);
+          return;
+        }
+        session.onFix(fix);
+      }, 1000);
+    });
 
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
       if (calmTimer.current) clearTimeout(calmTimer.current);
     };
   }, [enabled, voice]);

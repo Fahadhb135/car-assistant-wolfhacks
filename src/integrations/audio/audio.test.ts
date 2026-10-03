@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PHRASES } from '../../features/voice/phrases';
 import { buildSpeakerChain } from '../../features/voice/speakerChain';
 import { VoiceCoordinator } from '../../features/voice/VoiceCoordinator';
@@ -9,11 +9,17 @@ import { ExpoSpeechTts, type SpeechBackend, type SpeechCallbacks } from './ExpoS
 class FakeHandle implements PlayerHandle {
   log: string[] = [];
   private cb: (() => void) | null = null;
+  private errCb: ((m: string) => void) | null = null;
+  private loadedCb: ((d: number) => void) | null = null;
   play = () => void this.log.push('play');
   stop = () => void this.log.push('stop');
   release = () => void this.log.push('release');
   onFinished = (cb: () => void) => void (this.cb = cb);
+  onError = (cb: (m: string) => void) => void (this.errCb = cb);
+  onLoaded = (cb: (d: number) => void) => void (this.loadedCb = cb);
   finish = () => this.cb?.();
+  error = (m: string) => this.errCb?.(m);
+  loaded = (d: number) => this.loadedCb?.(d);
 }
 
 function fakeBackend() {
@@ -82,6 +88,75 @@ class FakeSpeech implements SpeechBackend {
   speak = (text: string, cb: SpeechCallbacks) => { this.spoken.push(text); this.cb = cb; };
   stop = () => void this.stops++;
 }
+
+describe('ExpoAudioPlayer never hangs the voice queue', () => {
+  it('rejects on a reported load/playback error, releasing the player', async () => {
+    const f = fakeBackend();
+    const p = new ExpoAudioPlayer(f.backend).play({ kind: 'bytes', data: new Uint8Array([1]), mime: 'audio/mpeg' }, sig().signal);
+    f.handles[0]!.error('cannot decode');
+    await expect(p).rejects.toThrow('cannot decode');
+    expect(f.handles[0]!.log).toEqual(['play', 'stop', 'release']);
+  });
+
+  it('rejects if the sound never loads', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fakeBackend();
+      const p = new ExpoAudioPlayer(f.backend, { loadTimeoutMs: 1000 }).play({ kind: 'asset', ref: 1 }, sig().signal);
+      const check = expect(p).rejects.toThrow('did not load');
+      await vi.advanceTimersByTimeAsync(1001);
+      await check;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects if a loaded sound runs well past its own length, but not before', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fakeBackend();
+      let settled = false;
+      const p = new ExpoAudioPlayer(f.backend, { loadTimeoutMs: 1000, finishGraceMs: 500 }).play({ kind: 'asset', ref: 1 }, sig().signal);
+      p.catch(() => {}).finally(() => (settled = true));
+      f.handles[0]!.loaded(2); // a 2 s clip
+      await vi.advanceTimersByTimeAsync(2400);
+      expect(settled).toBe(false); // still within 2 s + 0.5 s grace
+      const check = expect(p).rejects.toThrow('did not finish');
+      await vi.advanceTimersByTimeAsync(200);
+      await check;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a normal finish clears the watchdog', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fakeBackend();
+      const p = new ExpoAudioPlayer(f.backend, { loadTimeoutMs: 1000 }).play({ kind: 'asset', ref: 1 }, sig().signal);
+      f.handles[0]!.loaded(0.5);
+      f.handles[0]!.finish();
+      await p;
+      await vi.advanceTimersByTimeAsync(10_000); // nothing fires late
+      expect(f.handles[0]!.log).toEqual(['play', 'release']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a failed clip falls back to the phone voice instead of stalling the queue', async () => {
+    const f = fakeBackend();
+    const speech = new FakeSpeech();
+    const chain = buildSpeakerChain({ stop_ok: 3 }, new ExpoAudioPlayer(f.backend), new ExpoSpeechTts(speech));
+    const p = chain.speak({ text: 'Nice stop.', phraseId: 'stop_ok' }, sig().signal);
+    await flush();
+    f.handles[0]!.error('asset missing');
+    await flush();
+    speech.cb!.onDone();
+    await p;
+    expect(speech.spoken).toEqual(['Nice stop.']);
+  });
+});
 
 describe('ExpoSpeechTts', () => {
   it('speaks and settles on done; abort stops speech', async () => {

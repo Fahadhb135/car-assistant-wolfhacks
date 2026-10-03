@@ -9,6 +9,7 @@ import { CoachChatBar } from '@/features/driving-session/CoachChatBar';
 import { useCoachChat, type CoachChatApi } from '@/features/driving-session/useCoachChat';
 import { useDriveVoice } from '@/features/driving-session/useDriveVoice';
 import { useReplayDrive } from '@/features/driving-session/useReplayDrive';
+import { POLICIES } from '@/features/voice/phrases';
 import { colors } from '@/theme';
 
 /** Card tint per coaching tone (calm keeps the original cream). */
@@ -32,7 +33,7 @@ export default function DriveRoute() {
   // Replay mode runs the real coaching + voice code on a bundled route; live mode keeps the static card for now.
   // A safety alert (anything outranking a chat reply) stops the passenger's listening, so the alert is heard cleanly.
   const chatRef = useRef<CoachChatApi | null>(null);
-  const voice = useDriveVoice((alert) => alert.kind !== 'chat_reply' && chatRef.current?.cancel());
+  const voice = useDriveVoice((alert) => alert.priority > POLICIES.chat_reply.priority && chatRef.current?.cancel());
   const replay = useReplayDrive(mode === 'replay', voice);
   const chat = useCoachChat(voice, useCallback(() => replay.eventsRef.current, [replay.eventsRef]));
   chatRef.current = chat;

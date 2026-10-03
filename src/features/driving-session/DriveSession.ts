@@ -17,6 +17,8 @@ export type DriveSessionDeps = {
   nextId?: () => string;
   /** Every event, in order, for the UI feed and the trip record. */
   onEvent?: (event: DriveEvent) => void;
+  /** Map-tile loading failures (the drive carries on with whatever is already loaded). */
+  onError?: (err: unknown) => void;
 };
 
 /**
@@ -30,9 +32,14 @@ export class DriveSession {
     this.nextId = deps.nextId ?? createIdGenerator('ev-');
   }
 
-  async onFix(fix: GpsFix): Promise<DriveEvent[]> {
-    const { tiles, coach, hotspots, voice, onEvent } = this.deps;
-    await tiles.update(fix);
+  /**
+   * Synchronous on purpose: the live path never waits on the network (README section 7). Tile
+   * loading is started here and used from the next fix on, so events are never late (late alerts
+   * would be dropped as stale) and fixes are always processed in order.
+   */
+  onFix(fix: GpsFix): DriveEvent[] {
+    const { tiles, coach, hotspots, voice, onEvent, onError } = this.deps;
+    void tiles.update(fix).catch((err) => onError?.(err));
     const inputs: DriveEventInput[] = [
       ...(hotspots?.update(fix) ?? []),
       ...coach.update(fix, tiles.featuresAhead(fix), tiles.roadsNear(fix)),
@@ -43,5 +50,10 @@ export class DriveSession {
       voice.handleEvent(e);
     }
     return events;
+  }
+
+  /** Load the map around the starting point before the drive begins (used by replay). */
+  async prime(fix: GpsFix): Promise<void> {
+    await this.deps.tiles.update(fix);
   }
 }

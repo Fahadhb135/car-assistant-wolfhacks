@@ -3,6 +3,11 @@ import type { Alert } from './types';
 
 export type EnqueueResult = 'queued' | 'rate_limited';
 
+/** A dropped alert that is still streaming in must stop its request (SpokenStream contract). */
+function release(a: Alert): void {
+  a.utterance.stream?.cancel();
+}
+
 /** Priority queue with per-kind cooldowns and staleness dropping. Pure; time is passed in. */
 export class AlertQueue {
   private items: Alert[] = [];
@@ -34,7 +39,7 @@ export class AlertQueue {
 
   /** Drop everything of one kind (e.g. a chat reply the driver no longer wants). */
   removeKind(kind: string): void {
-    this.items = this.items.filter((a) => a.kind !== kind);
+    this.items = this.items.filter((a) => (a.kind === kind ? (release(a), false) : true));
   }
 
   size(): number {
@@ -46,6 +51,6 @@ export class AlertQueue {
   }
 
   private dropExpired(now: number): void {
-    this.items = this.items.filter((a) => now - a.createdAt <= a.ttlMs);
+    this.items = this.items.filter((a) => (now - a.createdAt <= a.ttlMs ? true : (release(a), false)));
   }
 }

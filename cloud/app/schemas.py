@@ -1,10 +1,11 @@
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-EventKind = Literal[
-    "crash", "erratic_driving", "stop_sign_ahead", "stop_ok", "rolling_stop", "ran_stop"
-]
+# Any well-formed kind is accepted (the app adds kinds over time: traffic_light_ahead, highway_*,
+# hotspot_ahead, ...). Rejecting an unknown kind would lose the whole trip; consumers (reports,
+# hotspots, Databricks) only act on the kinds they know.
+EventKind = Annotated[str, Field(pattern=r"^[a-z][a-z_]{0,39}$")]
 
 
 class TripEvent(BaseModel):
