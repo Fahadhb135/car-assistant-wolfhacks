@@ -30,3 +30,6 @@ yarn-error.*
 
 # Dev script caches (scripts/lib/fileTileStore.ts)
 .cache/
+
+# Local Claude Code worktrees
+.claude/worktrees/
