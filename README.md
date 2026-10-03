@@ -1,6 +1,8 @@
 # Car Assistant (WolfHacks)
 
-An AI driving coach built on the **STMicroelectronics SensorTile.box**. A dash-mounted sensor streams motion data over Bluetooth to a phone. The phone app runs the ML on-device, detects crashes and erratic driving, tracks the car against live map data, and a voice coach speaks up when you need it ("Stop sign ahead, start slowing down").
+An AI driving coach built on the **STMicroelectronics SensorTile.box**. A dash-mounted sensor streams motion data over Bluetooth to a phone. The phone app runs the ML on-device, detects crashes and erratic driving, tracks the car against live map data, and a voice coach speaks up when you need it ("Stop sign ahead, start slowing down"). After each trip, a small Python cloud service analyzes the drive with Gemini and feeds Databricks for long-term analysis and model retraining.
+
+**Design rule:** anything that must react while you are driving runs on the phone. Anything that can wait until the trip ends runs in the Python cloud service.
 
 Track: **Applied AI Hardware+**. Collect, analyze and act on real sensor data; detect patterns/anomalies; deploy ML to edge/IoT devices.
 
@@ -13,18 +15,23 @@ Track: **Applied AI Hardware+**. Collect, analyze and act on real sensor data; d
 1. Detect **crashes** and **erratic / impaired driving** (swerving, weaving, harsh braking) from IMU data.
 2. Act as a **live coach** for new and younger drivers: stop signs, speed, smoothness.
 3. Speak alerts aloud (ElevenLabs) and let the driver talk back hands-free (Gemini Live).
-4. Run **all detection on the edge (the phone)** so alerts have no network hop and work offline.
+4. Run **all real-time detection on the edge (the phone)** so alerts have no network hop and work offline.
+5. Use the cloud for what it is good at: Gemini trip analysis, long-term trends in Databricks, and retraining the model on pooled drives, then shipping the new model back to the phone.
 
 ### Non-goals
 - We do **not** claim to detect intoxication. See [Section 6](#6-ml-design).
 - Not a replacement for emergency services or a certified safety device.
-- No app-store release, accounts, cloud backend or billing.
+- No app-store release, user accounts or billing.
+- The cloud service is never in the live safety path. If it is down, driving alerts still work.
 
 ---
 
 ## 2. Architecture
 
-The app is **fully React Native**. There is no application server. Python is used **offline** to train the model; the trained model ships inside the app.
+The system has two halves.
+
+- **Real-time half, fully React Native on the phone.** BLE, signal processing, crash and erratic-driving detection, the stop-sign coach, voice alerts and the live Gemini voice chat. No application server is involved.
+- **Post-trip half, Python in the cloud.** A small FastAPI service receives finished trips, runs Gemini analysis, writes to Databricks, and publishes retrained models back to the app.
 
 ```
  SensorTile.box                       Phone (React Native app)
@@ -34,17 +41,30 @@ The app is **fully React Native**. There is no application server. Python is use
 │  firmware)   │        │   ▼                                                   │
 └──────────────┘        │ Signal pipeline: calibrate → window → features        │
                         │   ├─▶ Crash detector (thresholds)                     │
-                        │   └─▶ Erratic-driving model (ONNX / TS, trained in    │
-                        │        Python offline)                                │
+                        │   └─▶ Erratic-driving model (ONNX / TS, downloaded    │
+                        │        from cloud, bundled default)                   │
                         │ GPS (background location) ─▶ Tile cache ─▶ Stop-sign  │
                         │                              (Overpass)    coach      │
                         │ Event bus ─▶ Alert queue ─▶ ElevenLabs TTS / push     │
-                        │ Gemini Live (voice chat + transcript)                 │
-                        │ Local trip store (SQLite)                             │
+                        │ Gemini Live voice chat (direct, short-lived token)    │
+                        │ Local trip store (SQLite) ─▶ upload queue             │
+                        └───────────┬───────────────────────────▲───────────────┘
+                                    │ trip upload (wifi/opt-in) │ new model, token,
+                                    ▼                           │ trip reports
+                        ┌───────────────────────────────────────┴───────────────┐
+                        │ Python cloud service (FastAPI)                        │
+                        │  • POST /trips            ingest + validate           │
+                        │  • Gemini post-trip analysis / coaching summaries     │
+                        │  • mint Gemini Live ephemeral token                   │
+                        │  • serve latest model + version                       │
+                        └───────────────┬───────────────────────────────────────┘
+                                        ▼
+                        ┌───────────────────────────────────────────────────────┐
+                        │ Databricks: Delta tables ─▶ trends, risky locations,  │
+                        │ dashboards ─▶ retrain anomaly model ─▶ export ONNX    │
                         └───────────────────────────────────────────────────────┘
-                                  │ HTTPS only for: Overpass, ElevenLabs, Gemini
 
- Offline (laptop):  ml/  Python notebooks ─▶ train on recorded drives ─▶ export model ─▶ bundled in app
+ Offline (laptop):  ml/  Python notebooks ─▶ first model trained on our recorded drives ─▶ bundled in app
 ```
 
 ### Components
@@ -54,14 +74,18 @@ The app is **fully React Native**. There is no application server. Python is use
 | Sensor | SensorTile.box, **stock ST firmware** | Stream accelerometer + gyroscope over BLE |
 | Mobile app | React Native (Expo dev build), `react-native-ble-plx`, `expo-location`, `expo-av`, `expo-sqlite` | Everything at runtime: BLE, signal processing, inference, coaching, UI, audio, storage |
 | On-device ML | ONNX via `onnxruntime-react-native`, or plain TypeScript for a small model | Erratic-driving inference |
-| Training (offline) | Python, NumPy, scikit-learn, Jupyter | Feature design, training, evaluation, model export |
+| Training (offline) | Python, NumPy, scikit-learn, Jupyter | Feature design, first model, evaluation, export |
+| Cloud service | Python, FastAPI, hosted (free tier or laptop on hotspot for the demo) | Trip ingest, Gemini post-trip analysis, token minting, model distribution |
+| Long-term analysis | Databricks (Delta tables, notebooks, dashboards) | Trends, risky-location analysis, pooled-drive retraining, model export |
 | Map data | OpenStreetMap Overpass API (called from the phone) | Stop signs and road info in 1-mile tiles |
 | Voice out | ElevenLabs TTS | Spoken alerts and coaching |
-| Voice in / chat | Gemini Live API | Hands-free conversation, transcripts, post-drive summary |
+| Voice in / chat | Gemini Live API (phone connects directly) | Hands-free conversation and live transcript |
+| Post-trip analysis | Gemini API (called from the cloud service) | Trip reports, coaching summaries, weekly trends in plain language |
 
 Notes:
 - Expo Go cannot do BLE. The app needs a **dev build** (`expo run:ios` / `run:android` or EAS).
-- API keys for ElevenLabs and Gemini live in the app config for the hackathon. For anything beyond a demo, put a tiny key-holding proxy in front of them.
+- **Keys:** the Gemini API key lives only on the cloud service. The phone gets a short-lived Gemini Live token from it. ElevenLabs is called from the phone for latency, with its key in app config for the hackathon; route it through the service if time allows.
+- Confirm that the Gemini Live SDK version supports ephemeral tokens before relying on this. If not, proxy the Live session through the cloud service instead.
 
 ---
 
@@ -73,10 +97,18 @@ Notes:
 4. **Window and infer.** Samples are windowed (about 2 s, 50% overlap), turned into features, and scored by the on-device erratic-driving model. High scores emit `erratic_driving` events.
 5. **Location coach.** GPS plus heading are matched against cached stop-sign data (see Section 7). Emits `stop_sign_ahead` and `stop_sign_violation` events.
 6. **Speak.** Events go to a priority queue, then ElevenLabs (cached audio for fixed phrases), plus a local notification and on-screen banner.
-7. **Talk back.** The driver can speak to the assistant through Gemini Live ("how was that turn?"). Trip context is passed in so answers are specific. Transcripts are stored with the trip.
+7. **Talk back.** The driver can speak to the assistant through Gemini Live ("how was that turn?"). The phone fetches a short-lived token from the cloud service and connects directly. Trip context is passed in so answers are specific. Transcripts are stored with the trip.
 8. **Store.** Events, scores and transcripts are saved to the local trip store.
 
-Only three things leave the phone: Overpass tile queries, ElevenLabs TTS requests and Gemini Live audio/text. Detection itself needs no network.
+**Post-trip (cloud):**
+
+9. **Upload.** When the trip ends and the phone is on wifi (and the user has opted in), the app uploads the trip: events, scores, GPS trace, summary features, and optionally raw IMU windows for retraining.
+10. **Analyze.** The cloud service sends the trip summary to Gemini, which returns a plain-language report and coaching tips. The report goes back to the phone and is shown and read aloud.
+11. **Persist.** The service writes the trip to Databricks Delta tables.
+12. **Learn.** Databricks jobs compute trends and risky locations, power dashboards, and periodically retrain the anomaly model on pooled drives. The exported ONNX model is versioned and served by the cloud service.
+13. **Update.** On launch, the app checks the model version, downloads a newer model if available, validates it against bundled test vectors, and only then switches to it. The bundled model is always the fallback.
+
+Live detection, alerts and the stop-sign coach need no network. The network is used for Overpass tiles, ElevenLabs, the Gemini Live session, and the post-trip upload and model update.
 
 ---
 
@@ -102,7 +134,7 @@ Only three things leave the phone: Overpass tile queries, ElevenLabs TTS request
 ### Ideas for new/young drivers
 - Coaching mode with calmer, more verbose voice and tips (following distance, smooth braking)
 - Guided practice routes with per-turn feedback ("good brake, a bit sharp on that corner")
-- Parent view: weekly score and trends, no raw location sharing by default (needs a cloud sink, post-hackathon)
+- Parent view: weekly score and trends from the Databricks dashboard, no raw location sharing by default, opt-in only
 - Gamified streaks and badges for clean stops and smooth drives
 - Teen curfew / geofence alerts
 
@@ -111,7 +143,9 @@ Only three things leave the phone: Overpass tile queries, ElevenLabs TTS request
 - Risky-area learning: heat map of where the driver brakes hard
 - Insurance-style score export
 - Raspberry Pi gateway variant: Pi receives BLE and runs the model (hits the "Raspberry Pi" tech requirement)
-- IoT cloud sink (MQTT or similar) for fleet-style trip logging and a parent/judge dashboard
+- MQTT or similar as an alternative IoT ingest path into the cloud service, for fleet-style trip logging
+- Cross-driver insights in Databricks: where do new drivers most often roll stops, at what time of day, after how long behind the wheel
+- Weekly Gemini "coach's letter" per driver built from Databricks trends
 - Multi-language coaching via ElevenLabs multilingual voices
 - SensorTile.box microphone: detect horns, sirens or tire screech as extra context
 - Pothole detection from vertical accel spikes, tagged to GPS
@@ -138,13 +172,13 @@ Only three things leave the phone: Overpass tile queries, ElevenLabs TTS request
 We have no labeled "drunk" data and cannot ethically collect it. So we **do not claim intoxication detection**. We detect **impaired / erratic driving patterns**.
 
 - **Features per window:** lateral accel stats, yaw-rate variance, zero-crossing rate of yaw (weaving frequency), jerk, longitudinal accel spikes, dominant frequency of lateral motion.
-- **Model:** unsupervised anomaly detection (Isolation Forest baseline; optional small autoencoder). Trained **offline in Python** on normal driving we record ourselves.
+- **Model:** unsupervised anomaly detection (Isolation Forest baseline; optional small autoencoder). The first version is trained **offline in Python** on normal driving we record ourselves. Later versions are retrained in Databricks on pooled opted-in drives and delivered over the air.
 - **Deployment:** export to ONNX and run with `onnxruntime-react-native`. Fallback: re-implement feature extraction and a small model (trees or logistic regression) directly in TypeScript. Feature code is written once per language and checked against the Python version with shared test vectors, so the two cannot drift.
 - **Validation:** staged, deliberate weaving laps in a safe empty lot as the positive class. Report precision/recall on that, and say plainly what it measures.
 - **Output:** a continuous erratic-driving score plus a thresholded event with hysteresis (avoid flapping).
 
 ### 6.3 Edge deployment story
-Both detectors run on the phone, with no server in the loop. The model is trained in Python and shipped inside the app. Stretch: a Raspberry Pi gateway running the same model.
+Both detectors run on the phone, with no server in the loop. The model is trained in Python, shipped inside the app, and updated over the air from the cloud service after Databricks retraining. Every downloaded model is checked against bundled test vectors before it is activated. Stretch: a Raspberry Pi gateway running the same model.
 
 ### 6.4 Evaluation
 - Record 5+ normal drives and several staged weave sessions.
@@ -177,13 +211,16 @@ Both detectors run on the phone, with no server in the loop. The model is traine
 
 - **ElevenLabs** speaks every alert. Pre-generate and bundle audio for fixed phrases ("Stop sign ahead") so common alerts play instantly with no network. Use streaming TTS only for dynamic text.
 - **Priority queue:** crash > stop-sign > swerve > coaching tips. Higher priority interrupts lower. Rate-limit repeats.
-- **Gemini Live** provides the voice conversation and transcript. We give it trip context (recent events, score) as system context so answers are specific.
+- **Gemini Live** provides the live voice conversation and transcript. The phone connects directly using a short-lived token minted by the cloud service, so the key never ships in the app and there is no extra proxy hop. We give it trip context (recent events, score) as system context so answers are specific.
+- **Gemini (post-trip)** runs in the cloud service. It turns a trip's events and scores into a readable report and coaching tips, and later into weekly trend summaries using Databricks aggregates.
 - Never let the LLM make safety decisions. Detection is deterministic code and ML. The LLM explains and chats.
 - If the network is down, alerts fall back to bundled phrases and the device's built-in text-to-speech.
 
 ---
 
-## 9. Internal interfaces
+## 9. Interfaces
+
+### In-app (real-time path)
 
 No network API. Modules talk over an in-app event bus.
 
@@ -198,7 +235,27 @@ type DriveEvent =
   | { kind: 'stop_ok' | 'rolling_stop' | 'ran_stop'; severity: 'info' | 'warn' };
 ```
 
-Module boundaries: `ble/` → `pipeline/` (calibrate, window, features) → `detectors/` (crash, erratic) and `location/` (tiles, coach) → `events/` bus → `voice/` and `ui/`. Replay mode swaps `ble/` and GPS for a recorded-file source, so everything downstream is identical in live and replay.
+Module boundaries: `ble/` → `pipeline/` (calibrate, window, features) → `detectors/` (crash, erratic) and `location/` (tiles, coach) → `events/` bus → `voice/` and `ui/`. Replay mode swaps `ble/` and GPS for a recorded-file source, so everything downstream is identical in live and replay. A separate `sync/` module owns the upload queue and model updates, and never blocks the live path.
+
+### Cloud service (post-trip path, draft)
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /trips` | Upload a finished trip (events, scores, GPS trace, summary features, optional raw IMU windows). Idempotent by trip id. |
+| `GET /trips/{id}/report` | Gemini-generated report and coaching tips for a trip |
+| `POST /live-token` | Mint a short-lived Gemini Live token for the phone |
+| `GET /model/latest` | Current model version, checksum and download URL |
+| `GET /health` | Liveness |
+
+```json
+// POST /trips
+{"tripId":"uuid","driverId":"anon-uuid","start":1730000000,"end":1730001800,
+ "scores":{"smoothness":82,"stopCompliance":0.75},
+ "events":[{"t":1730000400,"kind":"rolling_stop","lat":43.47,"lon":-80.54}],
+ "features":[...], "rawWindows":null}
+```
+
+Driver ids are anonymous. Upload is opt-in, wifi-only by default, and queued with retry when offline.
 
 ---
 
@@ -206,10 +263,12 @@ Module boundaries: `ble/` → `pipeline/` (calibrate, window, features) → `det
 
 ```
 car-assistant-wolfhacks/
-├── app/               # React Native (Expo dev build) app
+├── app/               # React Native (Expo dev build) app: the whole real-time path
 │   └── src/
-│       ├── ble/  pipeline/  detectors/  location/  voice/  events/  storage/  ui/
-├── ml/                # Python (offline only): features, training notebooks, export, eval
+│       ├── ble/  pipeline/  detectors/  location/  voice/  events/  storage/  sync/  ui/
+├── cloud/             # Python FastAPI service: trip ingest, Gemini analysis, token minting, model serving
+├── databricks/        # notebooks and jobs: Delta table schemas, trend analysis, retraining, ONNX export
+├── ml/                # Python: shared feature code, first-model training, evaluation, test vectors
 ├── data/              # recorded drives (sensor + GPS) for training and replay
 ├── assets/audio/      # pre-generated alert phrases
 └── docs/
@@ -222,10 +281,11 @@ car-assistant-wolfhacks/
 We can't drive drunk or crash a car on stage, so the demo is built to be safe and reliable.
 
 1. **Live:** hold the SensorTile.box, shake/weave it to trigger swerve and crash alerts in real time, with voice and notifications. Works even in airplane mode, since detection is on-device.
-2. **Replay:** a pre-recorded drive (sensor + GPS) plays through the real pipeline for stop-sign coaching and a trip report.
-3. **Fallbacks:** replay mode if BLE fails, bundled audio if ElevenLabs is slow or offline, pre-fetched tiles if Overpass is down.
+2. **Replay:** a pre-recorded drive (sensor + GPS) plays through the real pipeline for stop-sign coaching.
+3. **Post-trip:** the replayed trip uploads to the cloud service, Gemini returns a report that the app reads aloud, and a Databricks dashboard shows trends across several pre-loaded trips.
+4. **Fallbacks:** replay mode if BLE fails, bundled audio if ElevenLabs is slow or offline, pre-fetched tiles if Overpass is down, and a pre-generated report plus dashboard screenshots if the cloud or venue wifi is down. Live detection never depends on the cloud.
 
-**Definition of done for the demo:** BLE stream visible live, one real-time swerve alert, one crash alert, one spoken stop-sign warning from replay, one trip summary from Gemini.
+**Definition of done for the demo:** BLE stream visible live, one real-time swerve alert, one crash alert, one spoken stop-sign warning from replay, one Gemini trip report, one Databricks trend view.
 
 ---
 
@@ -238,10 +298,15 @@ We can't drive drunk or crash a car on stage, so the demo is built to be safe an
 | ONNX runtime in React Native is fiddly | Keep the TypeScript fallback model; shared test vectors between Python and TS |
 | JS thread jitter under load | Keep per-window work small; batch BLE reads; measure inference time |
 | Drunk-detection credibility | Frame as erratic-driving detection; be explicit about validation |
-| API keys inside the app | Acceptable for a demo; use a proxy before any real release |
+| ElevenLabs key inside the app | Acceptable for a demo; route through the cloud service before any real release. Gemini keys stay server-side |
+| Gemini Live ephemeral tokens may not be supported by our SDK version | Check early; fall back to proxying the Live session through the cloud service |
+| Cloud hosting and Databricks setup time | Time-box it; build it after the real-time path works; pre-load demo trips |
+| Venue wifi unreliable | Cloud is only post-trip; pre-generated report and dashboard screenshots as backup |
+| Model update bugs (bad or mismatched model downloaded) | Version and checksum; validate with bundled test vectors before activating; keep the bundled model as fallback |
+| Pooled data bias (few drivers, one car) | Say so in the demo; treat retraining as a pipeline demonstration, not a validated improvement |
 | Background BLE/GPS limits on iOS/Android | Demo with the app foregrounded; test background behavior early |
 | Safety/legal | Passenger operates the app; the app is a coach, not a certified device; no distraction-inducing UI while moving |
-| Privacy | Location, audio and trips stay on the phone; sharing is opt-in and post-hackathon |
+| Privacy | Detection data stays on the phone; trip upload is opt-in, wifi-only by default, with anonymous driver ids; raw IMU and GPS upload is a separate opt-in |
 
 **Open questions**
 - Exact BLE characteristic layout and max stable rate on the stock firmware?
@@ -259,11 +324,15 @@ We can't drive drunk or crash a car on stage, so the demo is built to be safe an
 4. Train the anomaly model in Python; export; run it on the phone
 5. Overpass tiling + stop-sign state machine
 6. ElevenLabs alerts + notifications
-7. Gemini Live conversation + trip report
-8. Polish, demo script, fallbacks
+7. Gemini Live conversation (direct token, or proxied if tokens are unsupported)
+8. Cloud service: trip ingest, Gemini trip report, token minting
+9. Databricks: Delta tables, trend dashboard, retraining job, ONNX export, model download in the app
+10. Polish, demo script, fallbacks
+
+Steps 1 to 6 are the product and must work with no cloud. Steps 7 to 9 add to it and can be cut from the bottom if time runs out.
 
 ---
 
 ## 14. Tech summary
 
-React Native (Expo dev build) · TypeScript · `react-native-ble-plx` · `onnxruntime-react-native` · SQLite · Python (offline training: NumPy, scikit-learn) · OpenStreetMap Overpass · ElevenLabs · Gemini Live API · STMicroelectronics SensorTile.box
+React Native (Expo dev build) · TypeScript · `react-native-ble-plx` · `onnxruntime-react-native` · SQLite · Python (FastAPI cloud service; NumPy and scikit-learn for training) · Databricks (Delta, notebooks, dashboards) · OpenStreetMap Overpass · ElevenLabs · Gemini Live API + Gemini API · STMicroelectronics SensorTile.box
