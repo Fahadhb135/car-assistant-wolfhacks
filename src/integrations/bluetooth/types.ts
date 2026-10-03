@@ -22,6 +22,11 @@ export type GattServiceSnapshot = Readonly<{
   characteristics: readonly GattCharacteristicSnapshot[];
 }>;
 
+export type GattCharacteristicTarget = Readonly<{
+  serviceUuid: string;
+  characteristicUuid: string;
+}>;
+
 export type RawBlePacket = Readonly<{
   receivedMonotonicMs: number;
   serviceUuid: string;

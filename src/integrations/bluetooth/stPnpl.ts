@@ -9,9 +9,13 @@
 //   is running. DATALOG2 starts the BLE stream as part of starting the SD-card
 //   log, so the board needs an SD card.
 
-export const ST_FEATURE_SERVICE_UUID = '00000000-0001-11e1-9ab4-0002a5d5c51b';
-export const ST_PNPL_CHARACTERISTIC_UUID = '0000001b-0002-11e1-ac36-0002a5d5c51b';
-export const ST_RAW_STREAM_CHARACTERISTIC_UUID = '00000023-0002-11e1-ac36-0002a5d5c51b';
+import { STEVAL_MKBOXPRO_DATALOG2_V34_PROFILE as PROFILE } from './stevalMkboxProProfile';
+
+export {
+  ST_FEATURE_SERVICE_UUID,
+  ST_PNPL_CHARACTERISTIC_UUID,
+  ST_RAW_STREAM_CHARACTERISTIC_UUID,
+} from './stevalMkboxProProfile';
 
 // Packet-type header bytes (ble_comm_tp_packet_t in BLE_Manager.h).
 const START = 0x00;
@@ -123,21 +127,16 @@ function utf8Decode(bytes: Uint8Array): string {
   }
 }
 
-// Enum indices from Lsm6dsv16x_{Acc,Gyro}_PnPL.h.
-const ODR_120_HZ = 4;
-const ACC_FS_16_G = 3;
-const GYRO_FS_1000_DPS = 3;
-
 /** Commands that make DATALOG2 stream LSM6DSV16X accelerometer and gyroscope data at 120 Hz. */
 export function startImuStreamCommands(): string[] {
   return [
     JSON.stringify({ lsm6dsv16x_acc: { enable: true } }),
-    JSON.stringify({ lsm6dsv16x_acc: { odr: ODR_120_HZ } }),
-    JSON.stringify({ lsm6dsv16x_acc: { fs: ACC_FS_16_G } }),
+    JSON.stringify({ lsm6dsv16x_acc: { odr: PROFILE.sensors.accelerometer.odrIndex } }),
+    JSON.stringify({ lsm6dsv16x_acc: { fs: PROFILE.sensors.accelerometer.fullScaleIndex } }),
     JSON.stringify({ lsm6dsv16x_acc: { st_ble_stream: { acc: { enable: true } } } }),
     JSON.stringify({ lsm6dsv16x_gyro: { enable: true } }),
-    JSON.stringify({ lsm6dsv16x_gyro: { odr: ODR_120_HZ } }),
-    JSON.stringify({ lsm6dsv16x_gyro: { fs: GYRO_FS_1000_DPS } }),
+    JSON.stringify({ lsm6dsv16x_gyro: { odr: PROFILE.sensors.gyroscope.odrIndex } }),
+    JSON.stringify({ lsm6dsv16x_gyro: { fs: PROFILE.sensors.gyroscope.fullScaleIndex } }),
     JSON.stringify({ lsm6dsv16x_gyro: { st_ble_stream: { gyro: { enable: true } } } }),
     JSON.stringify({ 'log_controller*start_log': { interface: 0 } }),
   ];
