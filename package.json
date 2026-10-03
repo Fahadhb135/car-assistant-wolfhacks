@@ -9,10 +9,10 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "test": "npm run test:ble && npm run test:voice",
+    "test": "npm run test:node && npm run test:vitest",
     "typecheck": "tsc --noEmit",
-    "test:ble": "tsx --test src/integrations/bluetooth/*.test.ts",
-    "test:voice": "vitest run",
+    "test:node": "tsx --test 'src/core/location/**/*.test.ts' 'src/integrations/**/*.test.ts'",
+    "test:vitest": "vitest run",
     "phrases": "tsx scripts/generate-phrases.mts"
   },
   "dependencies": {

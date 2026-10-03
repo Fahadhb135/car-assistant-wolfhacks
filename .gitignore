@@ -34,3 +34,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 cloud/data/
+
+# Dev script caches (scripts/lib/fileTileStore.ts)
+.cache/
+
+# Local Claude Code worktrees
+.claude/worktrees/
