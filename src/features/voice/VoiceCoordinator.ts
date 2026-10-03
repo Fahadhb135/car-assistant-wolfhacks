@@ -1,13 +1,15 @@
 import type { DriveEvent } from '../../core/events/types';
 import { AlertQueue } from './AlertQueue';
-import { alertFromEvent, chatReplyAlert, coachingTipAlert } from './phrases';
-import type { Alert, LiveControl, Speaker } from './types';
+import { alertFromEvent, chatReplyAlert, chatReplyStreamAlert, coachingTipAlert } from './phrases';
+import type { Alert, LiveControl, Speaker, SpokenStream } from './types';
 
 export type VoiceDeps = {
   speaker: Speaker;
   live: LiveControl;
   now?: () => number;
   onError?: (err: unknown, alert: Alert) => void;
+  /** Fires just before an alert is spoken, e.g. so push-to-talk can stop listening for a safety alert. */
+  onAlertStart?: (alert: Alert) => void;
 };
 
 /**
@@ -41,6 +43,18 @@ export class VoiceCoordinator {
   speakReply(id: string, text: string): void {
     this.queue.enqueue(chatReplyAlert(id, text, this.now()), this.now());
     this.pump();
+  }
+
+  /** Speak a chat reply that is still streaming in, sentence by sentence. */
+  speakReplyStream(id: string, stream: SpokenStream): void {
+    this.queue.enqueue(chatReplyStreamAlert(id, stream, this.now()), this.now());
+    this.pump();
+  }
+
+  /** Stop any chat reply that is playing or waiting (the driver pressed talk, or asked something new). */
+  interruptChat(): void {
+    this.queue.removeKind('chat_reply');
+    if (this.current?.alert.kind === 'chat_reply') this.current.ctrl.abort();
   }
 
   /** Call when the Live session ends so deferred tips can play. */
@@ -84,6 +98,7 @@ export class VoiceCoordinator {
       this.livePaused = true;
     }
 
+    this.deps.onAlertStart?.(alert);
     try {
       await this.deps.speaker.speak(alert.utterance, ctrl.signal);
     } catch (err) {

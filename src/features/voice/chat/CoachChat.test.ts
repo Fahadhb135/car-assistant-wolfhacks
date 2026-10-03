@@ -5,7 +5,7 @@ const mk = (fetchImpl: unknown) => {
   const speak = vi.fn();
   const chat = new CoachChat({
     baseUrl: 'http://x',
-    voice: { speakReply: speak },
+    voice: { speakReply: speak, speakReplyStream: vi.fn() },
     getContext: () => ({ smoothness: 80 }),
     getRecentEvents: () => [{ eventId: 'e', t: 0, kind: 'rolling_stop', severity: 'warn' }],
     fetchImpl: fetchImpl as typeof fetch,

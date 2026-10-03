@@ -45,3 +45,33 @@ def test_databricks_host_without_scheme_is_normalised():
 
 def test_databricks_host_pasted_with_path_and_query_is_reduced_to_origin():
     assert DatabricksSink("https://dbc-1.cloud.databricks.com/explore/data?o=123", "t", "/Volumes/x").host == "https://dbc-1.cloud.databricks.com"
+
+
+from app.gemini_util import retry_after_seconds, worth_retrying  # noqa: E402
+
+
+def test_parses_googles_retry_hint():
+    assert retry_after_seconds("Please retry in 1h30m4.86s.") == 5404.86
+    assert retry_after_seconds("Please retry in 34s") == 34
+    assert retry_after_seconds("Please retry in 2m") == 120
+    assert retry_after_seconds("no hint here") is None
+
+
+def test_daily_quota_is_not_retried_but_a_short_wait_is():
+    assert worth_retrying("503 UNAVAILABLE high demand")
+    assert worth_retrying("429 RESOURCE_EXHAUSTED. Please retry in 3s")
+    assert not worth_retrying("429 RESOURCE_EXHAUSTED. Please retry in 1h30m4.8s")  # next model instead
+    assert not worth_retrying("404 NOT_FOUND no longer available")
+
+
+def test_daily_quota_moves_to_the_next_model_without_sleeping():
+    calls, slept = [], []
+
+    def fn(model):
+        calls.append(model)
+        if model == "flash":
+            raise RuntimeError("429 RESOURCE_EXHAUSTED. Please retry in 1h30m")
+        return "ok"
+
+    assert call_with_fallback(["flash", "lite"], fn, sleep=slept.append) == "ok"
+    assert calls == ["flash", "lite"] and slept == []

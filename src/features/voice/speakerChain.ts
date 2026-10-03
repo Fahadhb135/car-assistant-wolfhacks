@@ -1,6 +1,7 @@
 import { BundledAudioSpeaker } from './speakers/BundledAudioSpeaker';
 import { DeviceTtsSpeaker } from './speakers/DeviceTtsSpeaker';
 import { FallbackSpeaker } from './speakers/FallbackSpeaker';
+import { StreamedReplySpeaker } from './speakers/StreamedReplySpeaker';
 import type { AudioPlayer, TextToSpeech } from './speakers/ports';
 import type { Speaker } from './types';
 
@@ -14,5 +15,10 @@ export function buildSpeakerChain(
   tts: TextToSpeech,
   extra: Speaker[] = [],
 ): Speaker {
-  return new FallbackSpeaker([new BundledAudioSpeaker(assets, player), ...extra, new DeviceTtsSpeaker(tts)]);
+  return new FallbackSpeaker([
+    new StreamedReplySpeaker(player, tts), // declines unless the utterance is a streamed reply
+    new BundledAudioSpeaker(assets, player),
+    ...extra,
+    new DeviceTtsSpeaker(tts),
+  ]);
 }

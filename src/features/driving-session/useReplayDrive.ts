@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { createVoice } from '../voice/createVoice';
+import type { DriveEvent } from '../../core/events/types';
+import type { VoiceCoordinator } from '../voice/VoiceCoordinator';
 import { CLEAR_ROAD, coachMessage, type CoachMessage } from './coachMessage';
 import { createReplaySession } from './createReplaySession';
 import { replayFixes } from './replayRoute';
@@ -13,22 +14,29 @@ const CALM_AFTER_MS = 8_000;
  * Replays the demo drive in real time through the real coaching, hotspot and voice code, fully
  * offline (bundled map tile and hotspots). Returns the message for the drive screen's coach card.
  */
-export function useReplayDrive(enabled: boolean): { coach: CoachMessage; finished: boolean } {
+export function useReplayDrive(
+  enabled: boolean,
+  voice: Pick<VoiceCoordinator, 'handleEvent'>,
+): { coach: CoachMessage; finished: boolean; eventsRef: React.MutableRefObject<DriveEvent[]> } {
   const [coach, setCoach] = useState<CoachMessage>(CLEAR_ROAD);
   const [finished, setFinished] = useState(false);
   const calmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const eventsRef = useRef<DriveEvent[]>([]); // everything that has happened so far, for the chat's trip context
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    const voice = createVoice();
+    eventsRef.current = [];
     const show = (m: CoachMessage) => {
       if (cancelled) return;
       setCoach(m);
       if (calmTimer.current) clearTimeout(calmTimer.current);
       calmTimer.current = setTimeout(() => !cancelled && setCoach(CLEAR_ROAD), CALM_AFTER_MS);
     };
-    const session = createReplaySession(voice, (e) => show(coachMessage(e)));
+    const session = createReplaySession(voice, (e) => {
+      eventsRef.current.push(e);
+      show(coachMessage(e));
+    });
     // Fix times follow the real clock so the voice queue's staleness rules behave as in a live drive.
     const fixes = replayFixes(undefined, Date.now());
     let i = 0;
@@ -49,7 +57,7 @@ export function useReplayDrive(enabled: boolean): { coach: CoachMessage; finishe
       clearInterval(timer);
       if (calmTimer.current) clearTimeout(calmTimer.current);
     };
-  }, [enabled]);
+  }, [enabled, voice]);
 
-  return { coach, finished };
+  return { coach, finished, eventsRef };
 }

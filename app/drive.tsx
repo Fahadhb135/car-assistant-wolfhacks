@@ -1,10 +1,13 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Button, Dialog, Portal, Surface, Text } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CLEAR_ROAD, type CoachMessage } from '@/features/driving-session/coachMessage';
+import { CoachChatBar } from '@/features/driving-session/CoachChatBar';
+import { useCoachChat, type CoachChatApi } from '@/features/driving-session/useCoachChat';
+import { useDriveVoice } from '@/features/driving-session/useDriveVoice';
 import { useReplayDrive } from '@/features/driving-session/useReplayDrive';
 import { colors } from '@/theme';
 
@@ -27,7 +30,12 @@ export default function DriveRoute() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [confirmEnd, setConfirmEnd] = useState(false);
   // Replay mode runs the real coaching + voice code on a bundled route; live mode keeps the static card for now.
-  const replay = useReplayDrive(mode === 'replay');
+  // A safety alert (anything outranking a chat reply) stops the passenger's listening, so the alert is heard cleanly.
+  const chatRef = useRef<CoachChatApi | null>(null);
+  const voice = useDriveVoice((alert) => alert.kind !== 'chat_reply' && chatRef.current?.cancel());
+  const replay = useReplayDrive(mode === 'replay', voice);
+  const chat = useCoachChat(voice, useCallback(() => replay.eventsRef.current, [replay.eventsRef]));
+  chatRef.current = chat;
   const coach = mode === 'replay' ? replay.coach : CLEAR_ROAD;
 
   useEffect(() => {
@@ -70,6 +78,8 @@ export default function DriveRoute() {
             <Text variant="bodyMedium" style={styles.coachDetail}>{coach.detail}</Text>
           </View>
         </Surface>
+
+        <CoachChatBar chat={chat} />
 
         <View style={styles.signalRow}>
           <View style={styles.signalItem}>

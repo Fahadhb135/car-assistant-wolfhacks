@@ -111,6 +111,7 @@ describe('speaker chain on the phone', () => {
     const speech = new FakeSpeech();
     const chain = buildSpeakerChain({ stop_ok: 3 }, new ExpoAudioPlayer(f.backend), new ExpoSpeechTts(speech));
     const a = chain.speak({ text: 'Nice stop.', phraseId: 'stop_ok' }, sig().signal);
+    await flush(); // the streamed-reply speaker declines first, then the bundled clip starts
     f.handles[0]!.finish();
     await a;
     expect(speech.spoken).toEqual([]); // bundled audio was enough

@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from .chat import ChatFn, ChatRequest, ChatResponse, answer, chat_from_env
+from .chat_stream import TextStream, chat_text_stream_from_env, stream_reply
+from .tts import Tts
 from .databricks_sink import DatabricksSink
 from .hotspots import aggregate_events, events_from_trips, near
 from .db import TripStore
@@ -51,21 +53,29 @@ def create_app(
     live_token: Optional[LiveTokenFn] = None,
     chat: Optional[ChatFn] = None,
     sink: Optional[DatabricksSink] = None,
+    text_stream: Optional[TextStream] = None,
+    tts: Optional[Tts] = None,
 ) -> FastAPI:
     app = FastAPI(title="Car Assistant cloud")
     store = TripStore(db_path or os.environ.get("TRIPS_DB") or str(CLOUD_DIR / "data" / "trips.db"))
     folder = models_dir or Path(os.environ.get("MODELS_DIR") or CLOUD_DIR / "models")
 
     key = os.environ.get("GEMINI_API_KEY")
-    models = [
-        m.strip()
-        for m in os.environ.get("GEMINI_MODEL", "gemini-flash-latest,gemini-flash-lite-latest").split(",")
-        if m.strip()
-    ]
+    def model_list(var: str, default: str) -> list[str]:
+        return [m.strip() for m in os.environ.get(var, default).split(",") if m.strip()]
+
+    # Lite first: ~0.5 s to first token versus ~2 s, and the standard flash model has only a
+    # 20-requests/day free quota. The standard model stays as a fallback.
+    models = model_list("GEMINI_MODEL", "gemini-flash-lite-latest,gemini-flash-latest")
+    chat_models = model_list("GEMINI_CHAT_MODEL", "gemini-flash-lite-latest,gemini-flash-latest")
     if gemini is None and key:
         gemini = gemini_from_env(key, models)
     if chat is None and key:
-        chat = chat_from_env(key, models)
+        chat = chat_from_env(key, chat_models)
+    if text_stream is None and key:
+        text_stream = chat_text_stream_from_env(key, chat_models)
+    if tts is None and os.environ.get("ELEVENLABS_API_KEY") and os.environ.get("ELEVENLABS_VOICE_ID"):
+        tts = Tts(os.environ["ELEVENLABS_API_KEY"], os.environ["ELEVENLABS_VOICE_ID"])
     if live_token is None and key:
         live_token = live_token_from_env(key)
 
@@ -186,6 +196,17 @@ def create_app(
     @app.post("/chat", response_model=ChatResponse)
     def post_chat(req: ChatRequest) -> ChatResponse:
         return ChatResponse(reply=answer(req, chat))
+
+    @app.post("/chat/stream")
+    async def post_chat_stream(req: ChatRequest) -> StreamingResponse:
+        """Streamed coach reply: one JSON packet per sentence with its audio, so the phone can start
+        speaking the first sentence while the rest is still being written."""
+
+        async def lines():
+            async for packet in stream_reply(req, text_stream, tts.synthesize if tts else None):
+                yield json.dumps(packet) + "\n"
+
+        return StreamingResponse(lines(), media_type="application/x-ndjson")
 
     @app.post("/live-token")
     def post_live_token() -> dict:

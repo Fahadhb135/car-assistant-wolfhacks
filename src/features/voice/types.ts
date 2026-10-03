@@ -12,10 +12,19 @@ export type AlertKind =
   | 'chat_reply'
   | 'coaching_tip';
 
+/** One sentence of a streamed reply: its text, plus server-made audio when available. */
+export type Segment = { text: string; audio?: { data: Uint8Array; mime: string } | null };
+
+/** A reply that is still arriving. Cancelling must abort the underlying request. */
+export type SpokenStream = { segments: AsyncIterable<Segment>; cancel(): void };
+
 export type Utterance = {
+  /** For a streamed reply this is the fallback line, spoken if nothing arrives. */
   text: string;
   /** Set for fixed phrases that have bundled audio. Dynamic text leaves it unset. */
   phraseId?: string;
+  /** Set for streamed chat replies; spoken sentence by sentence as they arrive. */
+  stream?: SpokenStream;
 };
 
 export type Alert = {

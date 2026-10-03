@@ -1,5 +1,5 @@
 import type { DriveEvent } from '../../core/events/types';
-import type { Alert, AlertKind } from './types';
+import type { Alert, AlertKind, SpokenStream } from './types';
 
 export type AlertPolicy = {
   priority: number;
@@ -110,4 +110,11 @@ export function chatReplyAlert(id: string, text: string, now: number): Alert {
     createdAt: now,
     ttlMs: policy.ttlMs,
   };
+}
+
+export const REPLY_FALLBACK_TEXT = "Sorry, I can't answer that right now.";
+
+/** A chat reply that is still streaming in. Outranks tips, never a safety alert. */
+export function chatReplyStreamAlert(id: string, stream: SpokenStream, now: number): Alert {
+  return { ...chatReplyAlert(id, REPLY_FALLBACK_TEXT, now), utterance: { text: REPLY_FALLBACK_TEXT, stream } };
 }

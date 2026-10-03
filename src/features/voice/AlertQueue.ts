@@ -32,6 +32,11 @@ export class AlertQueue {
     return alert;
   }
 
+  /** Drop everything of one kind (e.g. a chat reply the driver no longer wants). */
+  removeKind(kind: string): void {
+    this.items = this.items.filter((a) => a.kind !== kind);
+  }
+
   size(): number {
     return this.items.length;
   }
