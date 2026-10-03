@@ -20,6 +20,14 @@ function monotonicNow(): number {
   return globalThis.performance?.now?.() ?? Date.now();
 }
 
+const SERVICE_CHANGED_SETTLE_MS = 1_000;
+const DISCOVERY_ATTEMPT_TIMEOUT_MS = 8_000;
+const DISCOVERY_ATTEMPTS = 3;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -99,16 +107,13 @@ export class ReactNativeBleClient implements BluetoothClient {
 
     console.info('[BLE connect] connecting', deviceId);
     const connected = await this.manager.connectToDevice(deviceId, { timeout: 10_000 });
-    console.info('[BLE connect] connected; discovering services');
-    const discoveryStartedMs = monotonicNow();
-    this.connectedDevice = await withTimeout(
-      connected.discoverAllServicesAndCharacteristics(),
-      60_000,
-      'Service discovery timed out after 60 s.',
-    );
-    console.info(
-      `[BLE connect] discovery complete in ${Math.round(monotonicNow() - discoveryStartedMs)} ms`,
-    );
+    // The SensorTile sends a GATT "Service Changed" indication for its whole
+    // database right after connecting. iOS then invalidates its cached
+    // services, and a discovery already in flight never completes in
+    // react-native-ble-plx. Let the indication arrive first, and retry
+    // discovery if it still stalls.
+    await delay(SERVICE_CHANGED_SETTLE_MS);
+    this.connectedDevice = await this.discoverWithRetry(connected);
 
     const services = await this.connectedDevice.services();
     this.gattServices = await Promise.all(
@@ -130,6 +135,29 @@ export class ReactNativeBleClient implements BluetoothClient {
     );
 
     return this.gattServices;
+  }
+
+  private async discoverWithRetry(device: Device): Promise<Device> {
+    for (let attempt = 1; ; attempt++) {
+      const startedMs = monotonicNow();
+      console.info(`[BLE connect] discovering services (attempt ${attempt})`);
+      try {
+        const discovered = await withTimeout(
+          device.discoverAllServicesAndCharacteristics(),
+          DISCOVERY_ATTEMPT_TIMEOUT_MS,
+          `Service discovery timed out after ${DISCOVERY_ATTEMPT_TIMEOUT_MS / 1_000} s.`,
+        );
+        console.info(
+          `[BLE connect] discovery complete in ${Math.round(monotonicNow() - startedMs)} ms`,
+        );
+        return discovered;
+      } catch (error) {
+        if (attempt >= DISCOVERY_ATTEMPTS) {
+          throw error;
+        }
+        console.warn('[BLE connect] discovery attempt failed; retrying', asError(error).message);
+      }
+    }
   }
 
   async monitorNotifiableCharacteristics(
