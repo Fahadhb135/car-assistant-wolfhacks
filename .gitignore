@@ -40,3 +40,6 @@ cloud/data/
 
 # Local Claude Code worktrees
 .claude/worktrees/
+
+# trained models are published by hand (cloud/fetch_model.py), never committed
+cloud/models/*.onnx

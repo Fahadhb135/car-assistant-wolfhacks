@@ -14,6 +14,7 @@ SELECT gridCell,
        AVG(lat) AS lat, AVG(lon) AS lon,
        COUNT(*) AS badEvents,
        COUNT(DISTINCT tripId) AS trips,
+       COUNT(DISTINCT driverId) AS drivers,
        COUNT_IF(kind = 'ran_stop') AS ranStops,
        COUNT_IF(kind = 'rolling_stop') AS rollingStops
 FROM {CAT}.{SCH}.events
@@ -50,6 +51,17 @@ rows = [r.asDict() for r in spark.table(f"{CAT}.{SCH}.events")
         .select("tripId", "driverId", "kind", "lat", "lon", "gridCell").collect()]
 hotspots = aggregate_events(rows, min_drivers=int(dbutils.widgets.get("min_drivers")))
 snapshot = {"generatedAt": int(time.time() * 1000), "demo": any(h["demo"] for h in hotspots), "hotspots": hotspots}
+# The same list as a Delta table, so the dashboard shows exactly what phones are told.
+rows_out = [
+    (h["cell"], h["lat"], h["lon"], h["bad"], h["trips"], h["drivers"], h["byKind"].get("ran_stop", 0),
+     h["byKind"].get("rolling_stop", 0), h["byKind"].get("erratic_driving", 0), h["topKind"], h["demo"])
+    for h in hotspots
+]
+spark.createDataFrame(
+    rows_out,
+    "cell STRING, lat DOUBLE, lon DOUBLE, bad INT, trips INT, drivers INT, ran INT, rolled INT, erratic INT, topKind STRING, demo BOOLEAN",
+).write.mode("overwrite").saveAsTable(f"{CAT}.{SCH}.hotspots")
+
 out = f"/Volumes/{CAT}/{SCH}/{VOL}/publish/hotspots.json"
 dbutils.fs.mkdirs(os.path.dirname(out))
 dbutils.fs.put(out, json.dumps(snapshot), True)

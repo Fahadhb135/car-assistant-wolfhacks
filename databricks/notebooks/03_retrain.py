@@ -5,6 +5,12 @@
 # Pipeline demo only: few drivers, one car. NOT run against a real workspace yet.
 
 # COMMAND ----------
+# MAGIC %pip install "numpy<2" skl2onnx onnxruntime
+
+# COMMAND ----------
+dbutils.library.restartPython()
+
+# COMMAND ----------
 import os, sys
 from collections import Counter
 from pathlib import Path
