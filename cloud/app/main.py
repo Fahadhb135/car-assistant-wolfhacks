@@ -20,37 +20,13 @@ from .schemas import Hotspot, HotspotSnapshot, ModelInfo, Report, Trip
 
 CLOUD_DIR = Path(__file__).resolve().parent.parent  # defaults live under cloud/ however we're launched
 
-LiveTokenFn = Callable[[], str]
 
-
-def live_token_from_env(api_key: str) -> LiveTokenFn:
-    """Mints a short-lived Gemini Live token. UNVERIFIED against the SDK: this is the
-    hour-1 spike. If it fails on a phone, replace with a WebSocket proxy."""
-
-    def mint() -> str:
-        import datetime
-
-        from google import genai
-
-        client = genai.Client(api_key=api_key, http_options={"api_version": "v1alpha"})
-        now = datetime.datetime.now(tz=datetime.timezone.utc)
-        token = client.auth_tokens.create(
-            config={
-                "uses": 1,
-                "expire_time": now + datetime.timedelta(minutes=30),
-                "new_session_expire_time": now + datetime.timedelta(minutes=1),
-            }
-        )
-        return token.name
-
-    return mint
 
 
 def create_app(
     db_path: Optional[str] = None,
     models_dir: Optional[Path] = None,
     gemini: Optional[GeminiFn] = None,
-    live_token: Optional[LiveTokenFn] = None,
     chat: Optional[ChatFn] = None,
     sink: Optional[DatabricksSink] = None,
     text_stream: Optional[TextStream] = None,
@@ -76,8 +52,6 @@ def create_app(
         text_stream = chat_text_stream_from_env(key, chat_models)
     if tts is None and os.environ.get("ELEVENLABS_API_KEY") and os.environ.get("ELEVENLABS_VOICE_ID"):
         tts = Tts(os.environ["ELEVENLABS_API_KEY"], os.environ["ELEVENLABS_VOICE_ID"])
-    if live_token is None and key:
-        live_token = live_token_from_env(key)
 
     if sink is None and os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN"):
         sink = DatabricksSink(
@@ -207,15 +181,6 @@ def create_app(
                 yield json.dumps(packet) + "\n"
 
         return StreamingResponse(lines(), media_type="application/x-ndjson")
-
-    @app.post("/live-token")
-    def post_live_token() -> dict:
-        if live_token is None:
-            raise HTTPException(503, "Gemini not configured")
-        try:
-            return {"token": live_token()}
-        except Exception as exc:
-            raise HTTPException(502, f"token mint failed: {exc}")
 
     @app.get("/model/latest", response_model=ModelInfo)
     def get_latest_model(request: Request) -> ModelInfo:

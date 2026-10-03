@@ -51,9 +51,8 @@ if os.environ.get("GEMINI_API_KEY"):
         reply = c.post(f"{base}/chat", json={"message": "In one sentence, what is a rolling stop?"}).json()["reply"]
         return "can't answer" not in reply, reply
     check("Gemini chat", chat)
-    check("Gemini Live token", lambda: ((r := c.post(f"{base}/live-token")).status_code == 200, f"HTTP {r.status_code} {r.text[:80]}"))
 else:
-    skip("Gemini report / chat / live token", "GEMINI_API_KEY not set")
+    skip("Gemini report / chat", "GEMINI_API_KEY not set")
 
 if os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN"):
     def dbx():

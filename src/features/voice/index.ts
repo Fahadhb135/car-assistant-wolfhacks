@@ -5,7 +5,6 @@ export { PHRASES, POLICIES, alertFromEvent, chatReplyAlert, coachingTipAlert } f
 export type { PhraseId } from './phrases';
 export { FallbackSpeaker } from './speakers/FallbackSpeaker';
 export { BundledAudioSpeaker } from './speakers/BundledAudioSpeaker';
-export { ElevenLabsSpeaker } from './speakers/ElevenLabsSpeaker';
 export { DeviceTtsSpeaker } from './speakers/DeviceTtsSpeaker';
 export type { AudioPlayer, TextToSpeech, AudioSource } from './speakers/ports';
 export * from './types';

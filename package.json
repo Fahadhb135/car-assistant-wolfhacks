@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
-    "@google/genai": "^2.27.0",
     "base64-js": "^1.5.1",
     "expo": "~57.0.26",
     "expo-audio": "~57.0.5",

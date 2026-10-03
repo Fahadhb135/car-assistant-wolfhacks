@@ -1,5 +1,5 @@
 import type { DriveEvent } from '../../../core/events/types';
-import { describeEvent, type TripContext } from '../live/prompt';
+import { describeEvent, type TripContext } from './describeEvent';
 import { streamReply } from '../../../integrations/backend/replyStream';
 import { REPLY_FALLBACK_TEXT } from '../phrases';
 import type { Segment } from '../types';

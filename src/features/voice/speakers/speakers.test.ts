@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BundledAudioSpeaker } from './BundledAudioSpeaker';
 import { DeviceTtsSpeaker } from './DeviceTtsSpeaker';
-import { ElevenLabsSpeaker } from './ElevenLabsSpeaker';
 import { FallbackSpeaker } from './FallbackSpeaker';
 import type { AudioPlayer } from './ports';
 
@@ -18,27 +17,17 @@ describe('speaker chain', () => {
     expect(p.played).toEqual([{ kind: 'asset', ref: 7 }]);
   });
 
-  it('falls through bundled -> ElevenLabs -> device TTS', async () => {
+  it('falls through bundled -> a failing speaker -> device TTS', async () => {
     const p = player();
     const spoken: string[] = [];
     const chain = new FallbackSpeaker([
       new BundledAudioSpeaker({}, p),
-      new ElevenLabsSpeaker(
-        { apiKey: 'k', voiceId: 'v', fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 500 }) as never },
-        p,
-      ),
+      { speak: async () => { throw new Error('remote speech down'); } },
       new DeviceTtsSpeaker({ speak: async (t) => void spoken.push(t) }),
     ]);
     await chain.speak({ text: 'Hello' }, sig());
     expect(spoken).toEqual(['Hello']);
     expect(p.played).toEqual([]);
-  });
-
-  it('plays ElevenLabs bytes for dynamic text', async () => {
-    const p = player();
-    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, arrayBuffer: async () => new Uint8Array([1, 2]).buffer });
-    await new ElevenLabsSpeaker({ apiKey: 'k', voiceId: 'v', fetchImpl: fetchImpl as never }, p).speak({ text: 'x' }, sig());
-    expect(p.played).toEqual([{ kind: 'bytes', data: new Uint8Array([1, 2]), mime: 'audio/mpeg' }]);
   });
 
   it('does not fall back to the next speaker after an abort', async () => {

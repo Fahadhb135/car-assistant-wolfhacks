@@ -73,10 +73,6 @@ def test_unknown_trip_404(make):
     assert make().get("/trips/nope/report").status_code == 404
 
 
-def test_live_token(make):
-    assert make().post("/live-token").status_code == 503
-    assert make(live_token=lambda: "tok").post("/live-token").json() == {"token": "tok"}
-
 
 def test_model_latest_picks_highest_version_with_checksum(make, tmp_path):
     c = make()
