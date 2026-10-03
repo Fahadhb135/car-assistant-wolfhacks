@@ -161,6 +161,7 @@ export function BluetoothDiagnosticScreen() {
       setStatus(`Connected; discovered ${discoveredServices.length} services`);
       console.info('[BLE GATT snapshot]', JSON.stringify(discoveredServices, null, 2));
     } catch (connectionError) {
+      console.warn('[BLE connect error]', connectionError);
       setError(connectionError instanceof Error ? connectionError.message : String(connectionError));
       setStatus('Connection failed');
     } finally {

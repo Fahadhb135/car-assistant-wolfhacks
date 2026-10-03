@@ -20,6 +20,14 @@ function monotonicNow(): number {
   return globalThis.performance?.now?.() ?? Date.now();
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 function summarizeDevice(device: Device): BluetoothDeviceSummary {
   return {
     id: device.id,
@@ -89,8 +97,15 @@ export class ReactNativeBleClient implements BluetoothClient {
     await this.stopScan();
     await this.disconnect();
 
+    console.info('[BLE connect] connecting', deviceId);
     const connected = await this.manager.connectToDevice(deviceId, { timeout: 10_000 });
-    this.connectedDevice = await connected.discoverAllServicesAndCharacteristics();
+    console.info('[BLE connect] connected; discovering services');
+    this.connectedDevice = await withTimeout(
+      connected.discoverAllServicesAndCharacteristics(),
+      15_000,
+      'Service discovery timed out after 15 s.',
+    );
+    console.info('[BLE connect] discovery complete');
 
     const services = await this.connectedDevice.services();
     this.gattServices = await Promise.all(
