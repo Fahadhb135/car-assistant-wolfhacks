@@ -52,3 +52,22 @@ class ModelInfo(BaseModel):
     sha256: str
     url: str
     featureSchemaVersion: int
+
+
+class Hotspot(BaseModel):
+    cell: str
+    lat: float
+    lon: float
+    bad: int
+    trips: int
+    drivers: int
+    byKind: dict[str, int]
+    topKind: Literal["ran_stop", "rolling_stop", "erratic_driving"]
+    demo: bool = False  # a seeded demo driver contributed to this place
+
+
+class HotspotSnapshot(BaseModel):
+    source: str  # "databricks" | "local"
+    generatedAt: int
+    demo: bool = False  # true when built only from seeded demo drivers
+    hotspots: list[Hotspot]

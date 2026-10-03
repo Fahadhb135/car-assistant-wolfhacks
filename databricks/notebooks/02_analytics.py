@@ -32,3 +32,25 @@ SELECT driverId, tripId, FROM_UNIXTIME(startMs / 1000) AS startedAt,
        AVG(smoothness) OVER (PARTITION BY driverId ORDER BY startMs ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS smoothness3TripAvg
 FROM {CAT}.{SCH}.trips""")
 display(spark.table(f"{CAT}.{SCH}.driver_trends").orderBy("driverId", "tripNumber"))
+
+# COMMAND ----------
+# Publish crowd hotspots for the phone. The cloud service reads publish/hotspots.json from
+# the trips Volume (POST /admin/hotspots/refresh) and serves it to phones at trip start.
+# Aggregation lives in cloud/app/hotspots.py (unit-tested, shared with the service) and only
+# reports places where at least 2 different drivers had problems (clustered within 50 m), so no single driver is exposed.
+import json, os, sys, time
+
+sys.path.append(os.path.abspath(os.path.join(os.getcwd(), "..", "..", "cloud")))
+from app.hotspots import aggregate_events
+
+dbutils.widgets.text("volume", "trips")
+dbutils.widgets.text("min_drivers", "2")
+VOL = dbutils.widgets.get("volume")
+rows = [r.asDict() for r in spark.table(f"{CAT}.{SCH}.events")
+        .select("tripId", "driverId", "kind", "lat", "lon", "gridCell").collect()]
+hotspots = aggregate_events(rows, min_drivers=int(dbutils.widgets.get("min_drivers")))
+snapshot = {"generatedAt": int(time.time() * 1000), "demo": any(h["demo"] for h in hotspots), "hotspots": hotspots}
+out = f"/Volumes/{CAT}/{SCH}/{VOL}/publish/hotspots.json"
+dbutils.fs.mkdirs(os.path.dirname(out))
+dbutils.fs.put(out, json.dumps(snapshot), True)
+print(f"published {len(snapshot['hotspots'])} hotspots (demo={snapshot['demo']}) to {out}")

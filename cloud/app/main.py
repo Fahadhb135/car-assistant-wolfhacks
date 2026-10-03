@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import time
@@ -9,10 +10,11 @@ from fastapi.responses import FileResponse
 
 from .chat import ChatFn, ChatRequest, ChatResponse, answer, chat_from_env
 from .databricks_sink import DatabricksSink
+from .hotspots import aggregate_events, events_from_trips, near
 from .db import TripStore
 from .model_registry import PATTERN, latest_model
 from .reports import GeminiFn, gemini_from_env, make_report
-from .schemas import ModelInfo, Report, Trip
+from .schemas import Hotspot, HotspotSnapshot, ModelInfo, Report, Trip
 
 CLOUD_DIR = Path(__file__).resolve().parent.parent  # defaults live under cloud/ however we're launched
 
@@ -86,6 +88,26 @@ def create_app(
             logging.getLogger("cloud").exception("databricks sync failed for %s", trip_id)
             return False
 
+    def check_admin(token: Optional[str]) -> None:
+        expected = os.environ.get("ADMIN_TOKEN")
+        if expected and token != expected:
+            raise HTTPException(401, "bad admin token")
+
+    def local_snapshot() -> HotspotSnapshot:
+        hotspots = aggregate_events(events_from_trips(store.all_trips()))
+        return HotspotSnapshot(
+            source="local",
+            generatedAt=int(time.time() * 1000),
+            demo=any(h["demo"] for h in hotspots),
+            hotspots=hotspots,
+        )
+
+    def databricks_snapshot() -> HotspotSnapshot:
+        """The ingest/analytics notebook publishes publish/hotspots.json into the Volume."""
+        assert sink is not None
+        raw = json.loads(sink.read_file("publish/hotspots.json"))
+        return HotspotSnapshot.model_validate({**raw, "source": "databricks"})
+
     def build_report(trip_id: str) -> None:
         trip = store.get_trip(trip_id)
         if trip and store.get_report(trip_id) is None:
@@ -117,14 +139,49 @@ def create_app(
     @app.post("/admin/databricks/sync")
     def sync_databricks(x_admin_token: Optional[str] = Header(default=None)) -> dict:
         """Retry trips that failed to reach Databricks (e.g. venue wifi was down)."""
-        expected = os.environ.get("ADMIN_TOKEN")
-        if expected and x_admin_token != expected:
-            raise HTTPException(401, "bad admin token")
+        check_admin(x_admin_token)
         if sink is None:
             raise HTTPException(503, "Databricks not configured")
         ids = store.unsynced_ids()
         done = sum(1 for i in ids if push_to_databricks(i))
         return {"pending": len(ids), "synced": done}
+
+    @app.get("/hotspots", response_model=HotspotSnapshot)
+    def get_hotspots(lat: float, lon: float, radiusM: float = 5000) -> HotspotSnapshot:
+        """Crowd hotspots near a point. Phones fetch this once at trip start."""
+        snap = store.load_hotspots()
+        if snap is None:  # nothing published yet: build from local trips
+            fresh = local_snapshot()
+            store.save_hotspots(fresh.model_dump())
+            snap_model = fresh
+        else:
+            snap_model = HotspotSnapshot.model_validate(snap)
+        radius = max(100.0, min(radiusM, 50_000.0))
+        keep = near([h.model_dump() for h in snap_model.hotspots], lat, lon, radius)
+        return snap_model.model_copy(update={"hotspots": [Hotspot(**h) for h in keep]})
+
+    @app.post("/admin/hotspots/refresh")
+    def refresh_hotspots(source: str = "auto", x_admin_token: Optional[str] = Header(default=None)) -> dict:
+        """Rebuild the served snapshot: from Databricks (auto, if configured) or from local trips."""
+        check_admin(x_admin_token)
+        if source not in ("auto", "databricks", "local"):
+            raise HTTPException(422, "source must be auto, databricks or local")
+        snap: Optional[HotspotSnapshot] = None
+        if source in ("auto", "databricks"):
+            if sink is None:
+                if source == "databricks":
+                    raise HTTPException(503, "Databricks not configured")
+            else:
+                try:
+                    snap = databricks_snapshot()
+                except Exception as exc:
+                    logging.getLogger("cloud").warning("databricks hotspots unavailable: %s", exc)
+                    if source == "databricks":
+                        raise HTTPException(502, f"could not read hotspots from Databricks: {exc}")
+        if snap is None:
+            snap = local_snapshot()
+        store.save_hotspots(snap.model_dump())
+        return {"source": snap.source, "count": len(snap.hotspots), "demo": snap.demo}
 
     @app.post("/chat", response_model=ChatResponse)
     def post_chat(req: ChatRequest) -> ChatResponse:

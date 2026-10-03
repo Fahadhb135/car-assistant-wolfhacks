@@ -7,6 +7,7 @@ trip upload -> cloud service -> SQLite (source of truth)
                              -> Files API PUT -> /Volumes/carassistant/default/trips/trips/<tripId>.json
 01_ingest     Volume JSON -> Delta tables trips / events / features (MERGE, idempotent)
 02_analytics  risky_locations, driver_trends -> dashboard
+              + publishes publish/hotspots.json (crowd hotspots, >=2 drivers, 50 m clusters)
 03_retrain    features -> IsolationForest -> model-vN.onnx (+ .meta.json) in a Volume
               -> a person copies it into cloud/models/ -> GET /model/latest -> phone validates + swaps
 ```

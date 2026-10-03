@@ -25,7 +25,9 @@ export class VoiceCoordinator {
   }
 
   handleEvent(event: DriveEvent): void {
-    this.queue.enqueue(alertFromEvent(event), this.now());
+    const alert = alertFromEvent(event);
+    if (!alert) return; // this event is informational only
+    this.queue.enqueue(alert, this.now());
     this.pump();
   }
 

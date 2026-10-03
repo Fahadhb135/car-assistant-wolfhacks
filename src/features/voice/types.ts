@@ -1,7 +1,11 @@
 export type AlertKind =
   | 'crash'
   | 'ran_stop'
+  | 'hotspot_ahead'
   | 'stop_sign_ahead'
+  | 'highway_entering'
+  | 'highway_exiting'
+  | 'traffic_light_ahead'
   | 'rolling_stop'
   | 'erratic_driving'
   | 'stop_ok'

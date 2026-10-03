@@ -11,7 +11,7 @@
     "web": "expo start --web",
     "test": "npm run test:node && npm run test:vitest",
     "typecheck": "tsc --noEmit",
-    "test:node": "tsx --test 'src/core/location/**/*.test.ts' 'src/integrations/**/*.test.ts'",
+    "test:node": "tsx --test 'src/core/location/**/*.test.ts' 'src/integrations/location/**/*.test.ts' 'src/integrations/bluetooth/**/*.test.ts'",
     "test:vitest": "vitest run",
     "phrases": "tsx scripts/generate-phrases.mts"
   },

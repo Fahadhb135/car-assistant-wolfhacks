@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS trips (
   received_at INTEGER NOT NULL,
   dbx_synced INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS hotspot_snapshot (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  payload TEXT NOT NULL
+);
 """
 
 
@@ -21,7 +25,7 @@ class TripStore:
     def __init__(self, path: str):
         os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
         self.conn = sqlite3.connect(path, check_same_thread=False)
-        self.conn.execute(SCHEMA)
+        self.conn.executescript(SCHEMA)
         try:  # databases created before Databricks support
             self.conn.execute("ALTER TABLE trips ADD COLUMN dbx_synced INTEGER NOT NULL DEFAULT 0")
         except sqlite3.OperationalError:
@@ -60,3 +64,15 @@ class TripStore:
     def unsynced_ids(self) -> list[str]:
         rows = self.conn.execute("SELECT trip_id FROM trips WHERE dbx_synced=0 ORDER BY received_at").fetchall()
         return [r[0] for r in rows]
+
+    def save_hotspots(self, snapshot: dict) -> None:
+        self.conn.execute(
+            "INSERT INTO hotspot_snapshot (id, payload) VALUES (1, ?) "
+            "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
+            (json.dumps(snapshot),),
+        )
+        self.conn.commit()
+
+    def load_hotspots(self) -> Optional[dict]:
+        row = self.conn.execute("SELECT payload FROM hotspot_snapshot WHERE id=1").fetchone()
+        return json.loads(row[0]) if row else None

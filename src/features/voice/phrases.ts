@@ -11,6 +11,12 @@ export const POLICIES: Record<AlertKind, AlertPolicy> = {
   crash: { priority: 100, ttlMs: 10_000, cooldownMs: 5_000 },
   ran_stop: { priority: 80, ttlMs: 5_000, cooldownMs: 10_000 },
   stop_sign_ahead: { priority: 70, ttlMs: 3_000, cooldownMs: 8_000 },
+  // Hotspot warnings are spoken ~250 m out so they finish before the 150 m stop-sign alert,
+  // which outranks them (README order: stop sign > highway > traffic light > swerve > tips).
+  hotspot_ahead: { priority: 65, ttlMs: 6_000, cooldownMs: 3_000 },
+  highway_entering: { priority: 58, ttlMs: 6_000, cooldownMs: 15_000 },
+  highway_exiting: { priority: 58, ttlMs: 6_000, cooldownMs: 15_000 },
+  traffic_light_ahead: { priority: 55, ttlMs: 4_000, cooldownMs: 5_000 },
   rolling_stop: { priority: 60, ttlMs: 5_000, cooldownMs: 10_000 },
   erratic_driving: { priority: 50, ttlMs: 5_000, cooldownMs: 20_000 },
   stop_ok: { priority: 20, ttlMs: 4_000, cooldownMs: 15_000 },
@@ -27,11 +33,18 @@ export const PHRASES = {
   rolling_stop: 'That was a rolling stop. Come to a full stop next time.',
   erratic_driving: 'Your driving looks unsteady. Take it easy and stay in your lane.',
   stop_ok: 'Nice stop.',
+  traffic_light_ahead: 'Traffic light ahead.',
+  highway_merge: 'Merging onto the highway. Speed up to match traffic.',
+  highway_exit: 'Exit ahead. Slow down for the ramp.',
+  hotspot_rolling: 'Heads up. Drivers often roll through the stop here.',
+  hotspot_ran: 'Heads up. Drivers often run the stop here.',
+  hotspot_erratic: 'Take extra care here. Other drivers often struggle in this area.',
 } as const;
 
 export type PhraseId = keyof typeof PHRASES;
 
-function phraseFor(event: DriveEvent): PhraseId {
+/** Fixed phrase for an event, or null when it should stay silent (e.g. a highway ramp taken at a good speed). */
+function phraseFor(event: DriveEvent): PhraseId | null {
   switch (event.kind) {
     case 'crash':
       return event.confirmed ? 'crash_confirmed' : 'crash_check';
@@ -45,11 +58,24 @@ function phraseFor(event: DriveEvent): PhraseId {
       return 'erratic_driving';
     case 'stop_ok':
       return 'stop_ok';
+    case 'traffic_light_ahead':
+      return 'traffic_light_ahead';
+    case 'highway_entering':
+      return event.advice === 'speed_up' ? 'highway_merge' : null;
+    case 'highway_exiting':
+      return event.advice === 'slow_down' ? 'highway_exit' : null;
+    case 'hotspot_ahead':
+      return event.topKind === 'ran_stop'
+        ? 'hotspot_ran'
+        : event.topKind === 'rolling_stop'
+          ? 'hotspot_rolling'
+          : 'hotspot_erratic';
   }
 }
 
-export function alertFromEvent(event: DriveEvent): Alert {
+export function alertFromEvent(event: DriveEvent): Alert | null {
   const phraseId = phraseFor(event);
+  if (!phraseId) return null;
   const policy = POLICIES[event.kind];
   return {
     id: event.eventId,

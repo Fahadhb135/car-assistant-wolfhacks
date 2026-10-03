@@ -1,7 +1,7 @@
 // Generates bundled alert audio once, from your machine. Needs ELEVENLABS_API_KEY
 // and ELEVENLABS_VOICE_ID in the environment (e.g. `node --env-file=.env`).
 // Never ship the key in the app bundle's build output; only the mp3s are committed.
-import { mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, writeFile } from 'node:fs/promises';
 import { PHRASES } from '../src/features/voice/phrases';
 
 const key = process.env.ELEVENLABS_API_KEY;
@@ -14,8 +14,18 @@ if (!key || !voice) {
 const outDir = new URL('../assets/audio/', import.meta.url);
 await mkdir(outDir, { recursive: true });
 
+// Skips phrases that already have audio, so re-running only pays for new ones (--force regenerates all).
+const force = process.argv.includes('--force');
+const exists = (u: URL) => access(u).then(() => true, () => false);
+
 const manifest: Record<string, string> = {};
 for (const [id, text] of Object.entries(PHRASES)) {
+  const file = `${id}.mp3`;
+  if (!force && (await exists(new URL(file, outDir)))) {
+    manifest[id] = file;
+    console.log('kept ', file);
+    continue;
+  }
   const res = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=mp3_44100_128`,
     {
@@ -25,7 +35,6 @@ for (const [id, text] of Object.entries(PHRASES)) {
     },
   );
   if (!res.ok) throw new Error(`${id}: HTTP ${res.status} ${await res.text()}`);
-  const file = `${id}.mp3`;
   await writeFile(new URL(file, outDir), Buffer.from(await res.arrayBuffer()));
   manifest[id] = file;
   console.log('wrote', file);

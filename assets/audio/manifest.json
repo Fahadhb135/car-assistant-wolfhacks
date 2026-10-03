@@ -5,5 +5,11 @@
   "stop_sign_ahead": "stop_sign_ahead.mp3",
   "rolling_stop": "rolling_stop.mp3",
   "erratic_driving": "erratic_driving.mp3",
-  "stop_ok": "stop_ok.mp3"
+  "stop_ok": "stop_ok.mp3",
+  "traffic_light_ahead": "traffic_light_ahead.mp3",
+  "highway_merge": "highway_merge.mp3",
+  "highway_exit": "highway_exit.mp3",
+  "hotspot_rolling": "hotspot_rolling.mp3",
+  "hotspot_ran": "hotspot_ran.mp3",
+  "hotspot_erratic": "hotspot_erratic.mp3"
 }

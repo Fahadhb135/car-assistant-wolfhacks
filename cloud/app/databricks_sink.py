@@ -34,3 +34,32 @@ class DatabricksSink:
             content=trip.model_dump_json().encode(),
         )
         resp.raise_for_status()
+
+    def _url(self, rel_path: str) -> str:
+        if ".." in rel_path.split("/") or rel_path.startswith("/"):
+            raise ValueError("unsafe path")
+        return f"{self.host}/api/2.0/fs/files{self.volume_path}/{rel_path}"
+
+    def write_file(self, rel_path: str, data: bytes) -> None:
+        resp = self.client.put(
+            self._url(rel_path),
+            params={"overwrite": "true"},
+            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/octet-stream"},
+            content=data,
+        )
+        resp.raise_for_status()
+
+    def read_file(self, rel_path: str) -> bytes:
+        resp = self.client.get(self._url(rel_path), headers={"Authorization": f"Bearer {self.token}"})
+        resp.raise_for_status()
+        return resp.content
+
+    def list_dir(self, rel_dir: str) -> list[str]:
+        if ".." in rel_dir.split("/") or rel_dir.startswith("/"):
+            raise ValueError("unsafe path")
+        resp = self.client.get(
+            f"{self.host}/api/2.0/fs/directories{self.volume_path}/{rel_dir.strip('/')}/",
+            headers={"Authorization": f"Bearer {self.token}"},
+        )
+        resp.raise_for_status()
+        return [c["name"] for c in resp.json().get("contents", []) if not c.get("is_directory")]

@@ -3,14 +3,14 @@ import { AlertQueue } from './AlertQueue';
 import { alertFromEvent, coachingTipAlert } from './phrases';
 import { ev } from './testing';
 
-const stopAhead = (t: number) => alertFromEvent(ev({ kind: 'stop_sign_ahead', severity: 'info', distanceM: 50 }, t));
+const stopAhead = (t: number) => alertFromEvent(ev({ kind: 'stop_sign_ahead', severity: 'info', distanceM: 50 }, t))!;
 
 describe('AlertQueue', () => {
   it('returns highest priority first', () => {
     const q = new AlertQueue();
     q.enqueue(coachingTipAlert('t', 'hi', 0), 0);
-    q.enqueue(alertFromEvent(ev({ kind: 'erratic_driving', severity: 'warn', score: 1 }, 0)), 0);
-    q.enqueue(alertFromEvent(ev({ kind: 'crash', severity: 'critical', confirmed: false }, 0)), 0);
+    q.enqueue(alertFromEvent(ev({ kind: 'erratic_driving', severity: 'warn', score: 1 }, 0))!, 0);
+    q.enqueue(alertFromEvent(ev({ kind: 'crash', severity: 'critical', confirmed: false }, 0))!, 0);
     expect(q.next(0, { allowTips: true })?.kind).toBe('crash');
     expect(q.next(0, { allowTips: true })?.kind).toBe('erratic_driving');
     expect(q.next(0, { allowTips: true })?.kind).toBe('coaching_tip');

@@ -13,6 +13,8 @@ Hard rules:
 - If asked about an emergency, tell them to pull over safely and call emergency services.
 - Only describe what the trip data below shows. If you don't know, say so.`;
 
+const mph = (mps: number) => Math.round(mps / 0.44704);
+
 export function describeEvent(e: DriveEvent): string {
   switch (e.kind) {
     case 'crash':
@@ -27,6 +29,18 @@ export function describeEvent(e: DriveEvent): string {
       return 'The driver rolled through a stop sign.';
     case 'ran_stop':
       return 'The driver ran a stop sign.';
+    case 'traffic_light_ahead':
+      return `A traffic light was ahead (${Math.round(e.distanceM)} m).`;
+    case 'highway_entering':
+      return e.advice === 'speed_up'
+        ? `The driver merged onto the highway slowly (${mph(e.speedMps)} mph vs about ${mph(e.targetSpeedMps)}).`
+        : 'The driver merged onto the highway at a good speed.';
+    case 'highway_exiting':
+      return e.advice === 'slow_down'
+        ? `The driver took the exit ramp fast (${mph(e.speedMps)} mph vs about ${mph(e.targetSpeedMps)}).`
+        : 'The driver took the exit ramp at a good speed.';
+    case 'hotspot_ahead':
+      return 'The driver was warned about a spot where other drivers often have trouble.';
   }
 }
 
