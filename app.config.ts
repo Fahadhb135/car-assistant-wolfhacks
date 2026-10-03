@@ -7,6 +7,11 @@ const config: ExpoConfig = {
   orientation: 'portrait',
   scheme: 'carassistant',
   userInterfaceStyle: 'automatic',
+  ios: {
+    // Each developer signs with their own Apple team, so the bundle ID is set
+    // per machine in .env rather than committed.
+    bundleIdentifier: process.env.IOS_BUNDLE_IDENTIFIER,
+  },
   plugins: [
     'expo-router',
     [

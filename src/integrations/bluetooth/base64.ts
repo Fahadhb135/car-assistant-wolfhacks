@@ -1,7 +1,11 @@
-import { toByteArray } from 'base64-js';
+import { fromByteArray, toByteArray } from 'base64-js';
 
 export function base64ToBytes(value: string): Uint8Array {
   return toByteArray(value);
+}
+
+export function bytesToBase64(bytes: Uint8Array): string {
+  return fromByteArray(bytes);
 }
 
 export function bytesToHex(bytes: Uint8Array): string {
