@@ -6,7 +6,7 @@ An AI driving coach built on the **STMicroelectronics SensorTile.box**. A dash-m
 
 Track: **Applied AI Hardware+**. Collect, analyze and act on real sensor data; detect patterns/anomalies; deploy ML to edge/IoT devices.
 
-> Status: the Expo mobile scaffold, BLE/GATT diagnostic, a mock-data UI flow for home, active drive, replay, and trip summary, and a pure-TypeScript heuristic IMU pipeline are implemented. The IMU pipeline emits experimental crash and swerve candidate events from replay data; its thresholds are not validated safety thresholds (see [the IMU pipeline guide](docs/imu-pipeline.md)). The STEVAL-MKBOXPRO v3.4.0 protocol profile is not yet decoded. The location layer (Overpass tiles, stop-sign / traffic-light announcements, highway entry/exit coaching) is implemented as tested TypeScript modules in `src/core/location/` and `src/integrations/location/`. The voice layer (alert queue, bundled ElevenLabs audio, streamed coach chat), crowd hotspots, the cloud service and the Databricks pipeline are implemented in `src/features/voice/`, `src/core/coaching/`, `cloud/` and `databricks/`; the drive screen's replay mode runs the real coaching and voice code offline on a bundled route.
+> Status: the Expo app can select a STEVAL-MKBOXPRO, decode its DATALOG2 v3.4 accelerometer/gyroscope stream, run the pure-TypeScript IMU pipeline, and route experimental crash/swerve candidates into the live drive event, voice, UI, and trip paths. Thresholds and provisional scale factors still require physical validation (see [the IMU pipeline guide](docs/imu-pipeline.md)). Ending a drive keeps a retryable in-app trip and posts it to the FastAPI service, which starts Gemini report generation and Databricks synchronization. The location modules, voice alert queue, bundled ElevenLabs audio, streamed push-to-talk Gemini chat, crowd hotspots, cloud service, and Databricks pipeline are implemented; replay mode runs the coaching and voice path offline on a bundled route.
 
 ---
 
@@ -98,11 +98,11 @@ Notes:
 5. **Location coach.** GPS plus heading are matched against cached map data (see Section 7). Emits `stop_sign_ahead`, `traffic_light_ahead`, `highway_entering` and `highway_exiting` events (implemented), and stop-compliance events `stop_ok` / `rolling_stop` / `ran_stop` (planned).
 6. **Speak.** Events go to a priority queue, then ElevenLabs (cached audio for fixed phrases), plus a local notification and on-screen banner.
 7. **Talk back.** The driver can speak to the assistant through Gemini Live ("how was that turn?"). The phone fetches a short-lived token from the cloud service and connects directly. Trip context is passed in so answers are specific. Transcripts are stored with the trip.
-8. **Store.** Events, scores and transcripts are saved to the local trip store.
+8. **Store.** Live IMU events and a score are retained in the in-app trip store. Durable storage, location events, features and chat transcripts still need to be added to live-trip serialization.
 
 **Post-trip (cloud):**
 
-9. **Upload.** When the trip ends and the phone is on wifi (and the user has opted in), the app uploads the trip: events, scores, GPS trace, summary features, and optionally raw IMU windows for retraining.
+9. **Upload.** When the trip ends, the app posts its supported events and score to `POST /trips` when `EXPO_PUBLIC_API_URL` is configured. A failed upload remains retryable for the current app session.
 10. **Analyze.** The cloud service sends the trip summary to Gemini, which returns a plain-language report and coaching tips. The report goes back to the phone and is shown and read aloud.
 11. **Persist.** The service writes the trip to Databricks Delta tables.
 12. **Learn.** Databricks jobs compute trends and risky locations, power dashboards, and periodically retrain the anomaly model on pooled drives. The exported ONNX model is versioned and served by the cloud service.

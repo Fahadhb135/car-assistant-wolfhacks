@@ -38,7 +38,7 @@ export default function HomeRoute() {
               contentStyle={styles.primaryButtonContent}
               labelStyle={styles.primaryButtonLabel}
               icon="arrow-right"
-              onPress={() => router.push('/drive')}
+              onPress={() => router.push('/sensor-setup')}
             >
               Start drive
             </Button>

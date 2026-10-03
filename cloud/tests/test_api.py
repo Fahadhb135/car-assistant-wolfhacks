@@ -44,6 +44,18 @@ def test_report_falls_back_to_template_without_gemini(make):
     assert "1 thing" in r["headline"]
 
 
+def test_unconfirmed_crash_stays_qualified_in_report(make):
+    trip = {
+        **TRIP,
+        "tripId": "candidate-crash",
+        "events": [{"eventId": "c1", "t": 5, "kind": "crash", "confirmed": False}],
+    }
+    c = make()
+    assert c.post("/trips", json=trip).status_code == 201
+    issue = c.get("/trips/candidate-crash/report").json()["topIssues"][0]
+    assert "possible crash" in issue["advice"].lower()
+
+
 def test_gemini_report_drops_hallucinated_event_refs(make):
     fake = lambda prompt: json.dumps(
         {
