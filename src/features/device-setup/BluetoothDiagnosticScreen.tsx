@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import type { DriveEvent } from '@/core/events/types';
+import type { ImuEvent } from '@/core/events/types';
 import { ImuPipeline, type StreamHealthSnapshot } from '@/core/imu';
 import type { ImuSample } from '@/core/sensors/types';
 import {
@@ -63,7 +63,7 @@ export function BluetoothDiagnosticScreen() {
   const sensorPacketCountsRef = useRef<Record<number, number>>({});
   const latestSampleRef = useRef<ImuSample | null>(null);
   const pipelineHealthRef = useRef<StreamHealthSnapshot | null>(null);
-  const eventLogRef = useRef<DriveEvent[]>([]);
+  const eventLogRef = useRef<ImuEvent[]>([]);
 
   const [status, setStatus] = useState('Ready to scan');
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +80,7 @@ export function BluetoothDiagnosticScreen() {
   const [sourceDiagnostics, setSourceDiagnostics] = useState<StevalSourceDiagnostics | null>(null);
   const [latestSample, setLatestSample] = useState<ImuSample | null>(null);
   const [pipelineHealth, setPipelineHealth] = useState<StreamHealthSnapshot | null>(null);
-  const [eventLog, setEventLog] = useState<readonly DriveEvent[]>([]);
+  const [eventLog, setEventLog] = useState<readonly ImuEvent[]>([]);
 
   if (!clientRef.current && Platform.OS !== 'web') {
     clientRef.current = new ReactNativeBleClient();
