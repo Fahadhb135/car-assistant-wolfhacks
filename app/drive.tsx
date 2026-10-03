@@ -1,10 +1,23 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Button, Dialog, Portal, Surface, Text } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CLEAR_ROAD, type CoachMessage } from '@/features/driving-session/coachMessage';
+import { CoachChatBar } from '@/features/driving-session/CoachChatBar';
+import { useCoachChat, type CoachChatApi } from '@/features/driving-session/useCoachChat';
+import { useDriveVoice } from '@/features/driving-session/useDriveVoice';
+import { useReplayDrive } from '@/features/driving-session/useReplayDrive';
 import { colors } from '@/theme';
+
+/** Card tint per coaching tone (calm keeps the original cream). */
+const TONE_BACKGROUND: Record<CoachMessage['tone'], string> = {
+  calm: colors.cream,
+  info: colors.mint,
+  warn: colors.amberSoft,
+  urgent: '#F6D5D5',
+};
 
 function formatTime(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
@@ -16,6 +29,14 @@ export default function DriveRoute() {
   const { mode } = useLocalSearchParams<{ mode?: string }>();
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [confirmEnd, setConfirmEnd] = useState(false);
+  // Replay mode runs the real coaching + voice code on a bundled route; live mode keeps the static card for now.
+  // A safety alert (anything outranking a chat reply) stops the passenger's listening, so the alert is heard cleanly.
+  const chatRef = useRef<CoachChatApi | null>(null);
+  const voice = useDriveVoice((alert) => alert.kind !== 'chat_reply' && chatRef.current?.cancel());
+  const replay = useReplayDrive(mode === 'replay', voice);
+  const chat = useCoachChat(voice, useCallback(() => replay.eventsRef.current, [replay.eventsRef]));
+  chatRef.current = chat;
+  const coach = mode === 'replay' ? replay.coach : CLEAR_ROAD;
 
   useEffect(() => {
     const timer = setInterval(() => setElapsedSeconds((current) => current + 1), 1_000);
@@ -47,16 +68,18 @@ export default function DriveRoute() {
           <Text variant="bodyLarge" style={styles.stateDetail}>Steady speed and clean turns.</Text>
         </View>
 
-        <Surface style={styles.coachCard} elevation={0}>
+        <Surface style={[styles.coachCard, { backgroundColor: TONE_BACKGROUND[coach.tone] }]} elevation={0}>
           <View style={styles.coachIcon}>
             <Text style={styles.coachIconText}>↗</Text>
           </View>
           <View style={styles.coachCopy}>
             <Text variant="labelLarge" style={styles.coachLabel}>COACH</Text>
-            <Text variant="titleLarge" style={styles.coachMessage}>Road is clear ahead</Text>
-            <Text variant="bodyMedium" style={styles.coachDetail}>Keep your current pace.</Text>
+            <Text variant="titleLarge" style={styles.coachMessage}>{coach.title}</Text>
+            <Text variant="bodyMedium" style={styles.coachDetail}>{coach.detail}</Text>
           </View>
         </Surface>
+
+        <CoachChatBar chat={chat} />
 
         <View style={styles.signalRow}>
           <View style={styles.signalItem}>

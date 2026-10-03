@@ -1,0 +1,12 @@
+export { VoiceCoordinator } from './VoiceCoordinator';
+export type { VoiceDeps } from './VoiceCoordinator';
+export { AlertQueue } from './AlertQueue';
+export { PHRASES, POLICIES, alertFromEvent, chatReplyAlert, coachingTipAlert } from './phrases';
+export type { PhraseId } from './phrases';
+export { FallbackSpeaker } from './speakers/FallbackSpeaker';
+export { BundledAudioSpeaker } from './speakers/BundledAudioSpeaker';
+export { DeviceTtsSpeaker } from './speakers/DeviceTtsSpeaker';
+export type { AudioPlayer, TextToSpeech, AudioSource } from './speakers/ports';
+export * from './types';
+export { CoachChat } from './chat/CoachChat';
+export type { CoachChatDeps } from './chat/CoachChat';

@@ -1,0 +1,16 @@
+{
+  "headline": "Great job getting behind the wheel today, Maya!",
+  "scoreExplanation": "Your overall smoothness and stop compliance scores reflect areas where extra attention can really help you improve.",
+  "topIssues": [
+    {
+      "eventRef": "e1",
+      "advice": "Remember to come to a complete, full stop at every stop sign."
+    },
+    {
+      "eventRef": "e5",
+      "advice": "Try to keep your steering and speed as steady as possible for a smoother ride."
+    }
+  ],
+  "praise": "You stayed focused throughout the trip and completed your journey successfully.",
+  "nextGoal": "Focus on making complete stops at all intersections on your next drive."
+}

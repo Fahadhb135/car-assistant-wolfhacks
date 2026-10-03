@@ -1,4 +1,4 @@
-import type { DriveEvent } from '../events/types';
+import type { ImuEvent } from '../events/types';
 import type { ImuSample } from '../sensors/types';
 import type { CrashDetectorConfig } from './types';
 
@@ -26,7 +26,7 @@ export class CrashCandidateDetector {
 
   constructor(private readonly config: CrashDetectorConfig) {}
 
-  process(sample: ImuSample): DriveEvent | undefined {
+  process(sample: ImuSample): ImuEvent | undefined {
     const accelerationG = accelerationMagnitude(sample);
     const angularVelocityDps = angularMagnitude(sample);
 
@@ -75,7 +75,7 @@ export class CrashCandidateDetector {
     const confidence = Math.min(1, 0.5 +
       0.25 * (this.episode.peakAccelerationG / this.config.triggerAccelerationG - 1) +
       0.25 * (this.episode.peakAngularVelocityDps / Math.max(1, this.config.minimumAngularVelocityDps) - 1));
-    const event: DriveEvent = Object.freeze({
+    const event: ImuEvent = Object.freeze({
       kind: 'crash_candidate',
       occurredAtMs: sample.receivedMonotonicMs,
       severity: 'critical',

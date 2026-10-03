@@ -1,4 +1,4 @@
-import type { DriveEvent } from '../events/types';
+import type { ImuEvent } from '../events/types';
 import type { ImuSample } from '../sensors/types';
 import { resolvePipelineConfig } from './config';
 import { CrashCandidateDetector } from './CrashCandidateDetector';
@@ -46,7 +46,7 @@ export class ImuPipeline {
     this.validator.accept(sample);
     this.health.recordAccepted(sample);
     this.buffer.push(sample);
-    const events: DriveEvent[] = [];
+    const events: ImuEvent[] = [];
     const crashEvent = this.crashDetector.process(sample);
     if (crashEvent) events.push(crashEvent);
 

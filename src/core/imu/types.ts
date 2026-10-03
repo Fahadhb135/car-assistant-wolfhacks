@@ -1,4 +1,4 @@
-import type { DriveEvent } from '../events/types';
+import type { ImuEvent } from '../events/types';
 import type { ImuSample } from '../sensors/types';
 
 export type SensorAxis = 'x' | 'y' | 'z';
@@ -103,14 +103,14 @@ export type ImuPipelineResult =
   | Readonly<{
       accepted: false;
       reason: SampleRejectionReason;
-      events: readonly DriveEvent[];
+      events: readonly ImuEvent[];
       completedWindows: readonly WindowFeatures[];
       skippedWindowCount: number;
       health: StreamHealthSnapshot;
     }>
   | Readonly<{
       accepted: true;
-      events: readonly DriveEvent[];
+      events: readonly ImuEvent[];
       completedWindows: readonly WindowFeatures[];
       skippedWindowCount: number;
       health: StreamHealthSnapshot;

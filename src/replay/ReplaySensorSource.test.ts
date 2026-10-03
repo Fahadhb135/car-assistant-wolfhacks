@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { DriveEvent } from '../core/events/types';
+import type { ImuEvent } from '../core/events/types';
 import { ImuPipeline } from '../core/imu';
 import type { ImuSample } from '../core/sensors/types';
 import { ReplaySensorSource } from './ReplaySensorSource';
@@ -12,9 +12,9 @@ import {
   stationaryFixture,
 } from './imuFixtures';
 
-async function processFixture(samples: readonly ImuSample[]): Promise<readonly DriveEvent[]> {
+async function processFixture(samples: readonly ImuSample[]): Promise<readonly ImuEvent[]> {
   const pipeline = new ImuPipeline();
-  const events: DriveEvent[] = [];
+  const events: ImuEvent[] = [];
   const errors: Error[] = [];
   await new ReplaySensorSource(samples).start(
     (sample) => events.push(...pipeline.process(sample).events),

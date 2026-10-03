@@ -1,4 +1,4 @@
-import type { DriveEvent } from '../events/types';
+import type { ImuEvent } from '../events/types';
 import type { SwerveDetectorConfig, WindowFeatures } from './types';
 
 export class SwerveCandidateDetector {
@@ -7,7 +7,7 @@ export class SwerveCandidateDetector {
 
   constructor(private readonly config: SwerveDetectorConfig) {}
 
-  process(features: WindowFeatures): DriveEvent | undefined {
+  process(features: WindowFeatures): ImuEvent | undefined {
     if (features.rotationAxisDirectionChanges <= this.config.releaseDirectionChanges) this.latched = false;
     const qualifies =
       features.sampleCount >= this.config.minimumSamples &&

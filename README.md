@@ -6,14 +6,14 @@ An AI driving coach built on the **STMicroelectronics SensorTile.box**. A dash-m
 
 Track: **Applied AI Hardware+**. Collect, analyze and act on real sensor data; detect patterns/anomalies; deploy ML to edge/IoT devices.
 
-> Status: the Expo mobile scaffold, BLE/GATT diagnostic, mock-data UI flow, and a pure-TypeScript heuristic IMU pipeline are implemented. The pipeline emits experimental crash and swerve candidate events from replay data; its thresholds are not validated safety thresholds. The STEVAL-MKBOXPRO v3.4.0 protocol profile is not yet decoded. See [the IMU pipeline guide](docs/imu-pipeline.md).
+> Status: the Expo mobile scaffold, BLE/GATT diagnostic, a mock-data UI flow for home, active drive, replay, and trip summary, and a pure-TypeScript heuristic IMU pipeline are implemented. The IMU pipeline emits experimental crash and swerve candidate events from replay data; its thresholds are not validated safety thresholds (see [the IMU pipeline guide](docs/imu-pipeline.md)). The STEVAL-MKBOXPRO v3.4.0 protocol profile is not yet decoded. The location layer (Overpass tiles, stop-sign / traffic-light announcements, highway entry/exit coaching) is implemented as tested TypeScript modules in `src/core/location/` and `src/integrations/location/`. The voice layer (alert queue, bundled ElevenLabs audio, streamed coach chat), crowd hotspots, the cloud service and the Databricks pipeline are implemented in `src/features/voice/`, `src/core/coaching/`, `cloud/` and `databricks/`; the drive screen's replay mode runs the real coaching and voice code offline on a bundled route.
 
 ---
 
 ## 1. Goals
 
 1. Detect **crashes** and **erratic / impaired driving** (swerving, weaving, harsh braking) from IMU data.
-2. Act as a **live coach** for new and younger drivers: stop signs, speed, smoothness.
+2. Act as a **live coach** for new and younger drivers: stop signs, traffic lights, merging onto and exiting highways, speed, smoothness.
 3. Speak alerts aloud (ElevenLabs) and let the driver talk back hands-free (Gemini Live).
 4. Run **all real-time detection on the edge (the phone)** so alerts have no network hop and work offline.
 5. Use the cloud for what it is good at: Gemini trip analysis, long-term trends in Databricks, and retraining the model on pooled drives, then shipping the new model back to the phone.
@@ -77,7 +77,7 @@ The system has two halves.
 | Training (offline) | Python, NumPy, scikit-learn, Jupyter | Feature design, first model, evaluation, export |
 | Cloud service | Python, FastAPI, hosted (free tier or laptop on hotspot for the demo) | Trip ingest, Gemini post-trip analysis, token minting, model distribution |
 | Long-term analysis | Databricks (Delta tables, notebooks, dashboards) | Trends, risky-location analysis, pooled-drive retraining, model export |
-| Map data | OpenStreetMap Overpass API (called from the phone) | Stop signs and road info in 1-mile tiles |
+| Map data | OpenStreetMap Overpass API (called from the phone) | Stop signs, traffic lights, and highway/ramp geometry with speed limits, in 1-mile tiles |
 | Voice out | ElevenLabs TTS | Spoken alerts and coaching |
 | Voice in / chat | Gemini Live API (phone connects directly) | Hands-free conversation and live transcript |
 | Post-trip analysis | Gemini API (called from the cloud service) | Trip reports, coaching summaries, weekly trends in plain language |
@@ -93,9 +93,9 @@ Notes:
 
 1. **Sensor to phone.** The SensorTile.box streams IMU packets over BLE. The app parses ST's characteristic format into `{t, ax, ay, az, gx, gy, gz}`.
 2. **Calibrate.** At the start of a trip, estimate the gravity vector and rotate samples into vehicle axes (forward / lateral / vertical).
-3. **Crash check.** Every sample goes through the threshold crash detector (see 6.1). The current implementation emits an experimental `crash_candidate`; alert wiring and real-data tuning are follow-up work.
-4. **Window and infer.** The current implementation uses timestamp windows and a deterministic swerve heuristic to emit `swerve_candidate`. The planned on-device erratic-driving model can later consume the same features after real drives are collected and evaluated.
-5. **Location coach.** GPS plus heading are matched against cached stop-sign data (see Section 7). Emits `stop_sign_ahead` and `stop_sign_violation` events.
+3. **Crash check.** Every sample goes through the threshold crash detector (see 6.1). The IMU pipeline (`src/core/imu/`) currently emits an experimental `crash_candidate`; `src/core/events/fromImu.ts` maps it to a `crash` event so the voice layer can alert. Real-data tuning is follow-up work.
+4. **Window and infer.** The current implementation uses timestamp windows and a deterministic swerve heuristic to emit `swerve_candidate`, which the same adapter maps to `erratic_driving`. The planned on-device erratic-driving model can later consume the same features after real drives are collected and evaluated.
+5. **Location coach.** GPS plus heading are matched against cached map data (see Section 7). Emits `stop_sign_ahead`, `traffic_light_ahead`, `highway_entering` and `highway_exiting` events (implemented), and stop-compliance events `stop_ok` / `rolling_stop` / `ran_stop` (planned).
 6. **Speak.** Events go to a priority queue, then ElevenLabs (cached audio for fixed phrases), plus a local notification and on-screen banner.
 7. **Talk back.** The driver can speak to the assistant through Gemini Live ("how was that turn?"). The phone fetches a short-lived token from the cloud service and connects directly. Trip context is passed in so answers are specific. Transcripts are stored with the trip.
 8. **Store.** Events, scores and transcripts are saved to the local trip store.
@@ -119,6 +119,8 @@ Live detection, alerts and the stop-sign coach need no network. The network is u
 - **Crash detection** (on-device thresholds)
 - **Swerve / erratic driving detection** with anomaly score and live "smoothness" gauge
 - **Stop-sign coaching**: warn on approach, flag rolling or missed stops
+- **Traffic-light heads-up**: "Traffic light ahead" on approach (OSM `highway=traffic_signals`; we cannot see the light's color)
+- **Highway merge and exit coaching**: on an on-ramp, "speed up to match traffic" toward the highway's limit; on an off-ramp, "slow down" toward the ramp's limit
 - Spoken alerts via ElevenLabs
 - In-app alert feed and notifications
 - **Replay mode**: play back a recorded drive (sensor + GPS) in place of live input (our demo safety net)
@@ -139,7 +141,7 @@ Live detection, alerts and the stop-sign coach need no network. The network is u
 - Teen curfew / geofence alerts
 
 ### Extra ideas
-- School zone, railroad crossing and traffic signal warnings from OSM tags
+- School zone and railroad crossing warnings from OSM tags (traffic signals are now core, see above)
 - Risky-area learning: heat map of where the driver brakes hard
 - Insurance-style score export
 - Raspberry Pi gateway variant: Pi receives BLE and runs the model (hits the "Raspberry Pi" tech requirement)
@@ -188,29 +190,53 @@ Both detectors run on the phone, with no server in the loop. The model is traine
 
 ---
 
-## 7. Location & stop-sign coaching
+## 7. Location coaching (stop signs, traffic lights, highways)
 
-**Tiling.** Instead of querying per GPS fix, the app fetches map data in **~1-mile tiles** for good latency and fewer API calls.
+**Tiling.** Instead of querying per GPS fix, the app fetches map data in **~1-mile tiles** for good latency and fewer API calls (`src/core/location/tiles.ts`).
 
-1. On the first fix, compute the tile around the car and query Overpass for `highway=stop` nodes (and later `maxspeed`, crossings, etc.).
-2. **Cache** per tile (by quantized lat/lon key) in memory and in local storage.
-3. When the car nears the tile edge (about 25% remaining along its heading), **prefetch** the next tile.
-4. Only consider signs **ahead of the car**: filter by bearing within about ±35° of heading and by distance.
+1. Tiles are fixed 1-mile bands of latitude; each band picks its own longitude step so tiles stay square. Keys look like `2472:-4408`.
+2. One Overpass query per tile (`src/core/location/overpass.ts`) fetches everything the coach needs:
+   - stop signs: nodes `highway=stop`
+   - traffic lights: nodes `highway=traffic_signals`
+   - highways and ramps: ways `highway=motorway` and `highway=motorway_link`, with geometry, `oneway`, `maxspeed`, `ref` and `name`
+3. **Cache** (`src/integrations/location/tileCache.ts`), in order: memory, then persistent store, then Overpass, then a stale stored copy, then bundled demo-route tiles. Stored tiles carry a schema version so tiles from an older build are refetched rather than misread.
+4. **Prefetch:** when the point 25% of a tile ahead along the heading falls in another tile, fetch that tile. The tiles under the look-ahead cone are loaded too, since a sign 150 m ahead can sit across a tile border.
+5. **The live path never waits on the network:** call `cache.update(fix)` on every fix without awaiting it, then read `cache.featuresAhead(fix)` and `cache.roadsNear(fix)` synchronously and pass them to `LocationCoach.update(fix, ahead, roads)` (`src/core/location/coach.ts`).
 
-**Coach logic (state machine per sign):**
-- `approaching` at about 150 m: "Stop sign ahead, start slowing down."
+**Stop signs and traffic lights ahead** (`featureFilter.ts`): keep features within 200 m and ±35° of the heading. When OSM gives an absolute `direction` (degrees or cardinal), drop features that face a cross street; we read it as the way the sign faces, so a north-facing sign applies to southbound cars. `forward`/`backward` and untagged features are kept, and most OSM stop signs are untagged.
+
+**Announcements:** `stop_sign_ahead` or `traffic_light_ahead` fires once at about 150 m. Features of the same kind within 40 m of an announced one count as the same intersection and are not announced again, since an all-way stop is often mapped as one node per approach. A feature can be announced again after it has been out of view for 30 s.
+
+**Highway entry and exit** (`roads.ts` + `coach.ts`):
+- Map-match each fix to the nearest `motorway` / `motorway_link` segment within 25 m whose direction of travel is within 40° of the car's heading. The heading check separates a ramp from the opposite carriageway or a parallel road.
+- Each fix is classed as `local`, `ramp` or `highway`. A change only counts after 3 consecutive fixes, so GPS jitter at a ramp's gore point doesn't flip-flop.
+- `local → ramp` emits **`highway_entering`**. The target is the `maxspeed` of the nearest highway within 1 km, or 55 mph if untagged. Advice is `speed_up` (severity `warn`) if the car is more than 10 mph under the target.
+- `highway → ramp` emits **`highway_exiting`**. The target is the ramp's `maxspeed`, or 35 mph if untagged. Advice is `slow_down` (severity `warn`) if the car is more than 10 mph over the target. Highway-to-highway interchange ramps also trigger this, which is reasonable because they are usually slower and curved.
+- Only `motorway` counts as a highway. `trunk_link` is also used for ordinary turn lanes at signalized intersections and would cause false alerts. Expressways mapped as `trunk` are not covered yet.
+
+**Stop compliance (planned, not built yet):** a state machine per sign:
+- `approaching` at about 150 m: "Stop sign ahead, start slowing down." (this announcement is built)
 - `braking check` at about 60 m: is speed trending down fast enough?
 - `at sign` within about 10 m: did speed reach below about 2 mph (stopped) or just slow?
 - Emit `stop_ok`, `rolling_stop` or `ran_stop` and say so.
 
-**Caveats we design for:** GPS jitter (smooth with a short filter), OSM stop signs on intersecting roads that don't apply to our direction (use the `direction` tag and bearing), Overpass rate limits and downtime (cache, and fall back to the bundled demo-route data). Pre-fetch the demo route's tiles before the demo.
+**Caveats we design for:**
+- **GPS jitter:** smooth with a short filter; highway class changes need 3 agreeing fixes.
+- **Stop signs for cross streets:** OSM signs that apply to intersecting roads are filtered with the `direction` tag and bearing where it exists. Untagged ones remain a known limitation.
+- **Overpass rate limits and downtime:** handled with the cache, a 30 s back-off per failed tile, three mirrors, and fallback to bundled demo-route data. In testing, all public mirrors sometimes timed out at once. Pre-fetch the demo route's tiles before the demo.
+- **User-Agent:** `overpass-api.de` returns HTTP 406 to requests without a descriptive `User-Agent`, so the client always sends one.
+
+**Dev tools** (run with `npx tsx`; tiles are cached in `.cache/tiles/`):
+- `scripts/try-location.mts <lat> <lon> <heading> [driveMeters] [speedMph]`: shows a tile's contents and the features ahead, and simulates a straight drive through the real coach.
+- `scripts/try-highway.mts <lat> <lon>`: finds real on-ramps and off-ramps in a tile and drives them through the coach. Example: `35.8028 -78.7255` (I-40 / Wade Ave, Raleigh).
+- `scripts/verify-signs.mts <lat> <lon> <heading> [--all] [--lights]`: cross-checks OSM stop signs or traffic lights against Mapillary's computer-vision detections. Needs a free `MAPILLARY_TOKEN` in `.env`. Without one, it prints Street View links.
 
 ---
 
 ## 8. Voice layer
 
 - **ElevenLabs** speaks every alert. Pre-generate and bundle audio for fixed phrases ("Stop sign ahead") so common alerts play instantly with no network. Use streaming TTS only for dynamic text.
-- **Priority queue:** crash > stop-sign > swerve > coaching tips. Higher priority interrupts lower. Rate-limit repeats.
+- **Priority queue:** crash > stop-sign > highway merge/exit > traffic light > swerve > coaching tips. Higher priority interrupts lower. Rate-limit repeats.
 - **Gemini Live** provides the live voice conversation and transcript. The phone connects directly using a short-lived token minted by the cloud service, so the key never ships in the app and there is no extra proxy hop. We give it trip context (recent events, score) as system context so answers are specific.
 - **Gemini (post-trip)** runs in the cloud service. It turns a trip's events and scores into a readable report and coaching tips, and later into weekly trend summaries using Databricks aggregates.
 - Never let the LLM make safety decisions. Detection is deterministic code and ML. The LLM explains and chats.
@@ -226,18 +252,23 @@ No network API. Modules talk over an in-app event bus.
 
 ```ts
 type Sample = { t: number; ax: number; ay: number; az: number; gx: number; gy: number; gz: number };
+// speed in m/s, heading in degrees from true north; -1 when unknown (expo-location)
 type GpsFix = { t: number; lat: number; lon: number; speed: number; heading: number };
 
-type DriveEvent = {
-  kind: 'crash_candidate' | 'swerve_candidate';
-  occurredAtMs: number;
-  severity: 'warning' | 'critical';
-  confidence: number;
-  evidence: Readonly<Record<string, number>>;
-};
+type DriveEvent =
+  | { kind: 'crash'; severity: 'critical'; confirmed: boolean }
+  | { kind: 'erratic_driving'; severity: 'warn'; score: number }
+  | { kind: 'stop_sign_ahead' | 'traffic_light_ahead'; severity: 'info'; t: number; distanceM: number; featureId: number }
+  | { kind: 'highway_entering' | 'highway_exiting'; severity: 'info' | 'warn'; t: number;
+      speedMps: number; targetSpeedMps: number; targetIsDefault: boolean;
+      advice: 'speed_up' | 'slow_down' | 'ok'; road?: string }
+  | { kind: 'stop_ok' | 'rolling_stop' | 'ran_stop'; severity: 'info' | 'warn' };
 
-// Location and coaching modules will extend the domain event union separately.
+// The IMU pipeline (src/core/imu) emits its own `ImuEvent` candidates (crash_candidate, swerve_candidate)
+// with confidence and evidence; src/core/events/fromImu.ts maps them into this union.
 ```
+
+`GpsFix` and the location events are implemented in `src/core/location/types.ts` and `src/core/location/events.ts` (`LocationEvent`). They move into `src/core/events/types.ts` when that shared module is created. `featureId` is the OSM node id. `road` is the highway's `ref` or `name` (e.g. "I 440"). Speeds are m/s, and the voice layer converts them for speech.
 
 Module boundaries: `ble/` → `pipeline/` (calibrate, window, features) → `detectors/` (crash, erratic) and `location/` (tiles, coach) → `events/` bus → `voice/` and `ui/`. Replay mode swaps `ble/` and GPS for a recorded-file source, so everything downstream is identical in live and replay. A separate `sync/` module owns the upload queue and model updates, and never blocks the live path.
 
@@ -289,9 +320,18 @@ car-assistant-wolfhacks/
 │   │   ├── detection/
 │   │   │   ├── crashDetector.ts
 │   │   │   └── erraticDrivingDetector.ts
-│   │   └── events/
-│   │       ├── types.ts
-│   │       └── priority.ts
+│   │   ├── events/
+│   │   │   ├── types.ts
+│   │   │   └── priority.ts
+│   │   └── location/
+│   │       ├── types.ts             # GpsFix, RoadFeature, RoadWay
+│   │       ├── events.ts            # LocationEvent (part of DriveEvent)
+│   │       ├── geo.ts               # Distance, bearing, destination
+│   │       ├── tiles.ts             # 1-mile tiles, prefetch
+│   │       ├── overpass.ts          # Tile query + response parsing
+│   │       ├── featureFilter.ts     # Stop signs / lights ahead of the car
+│   │       ├── roads.ts             # Map-matching to highway / ramp
+│   │       └── coach.ts             # LocationCoach: announcements, merge/exit
 │   │
 │   ├── integrations/            # Native devices and external services
 │   │   ├── bluetooth/
@@ -300,6 +340,8 @@ car-assistant-wolfhacks/
 │   │   │   ├── permissions.ts
 │   │   │   └── uuids.ts
 │   │   ├── location/
+│   │   │   ├── overpassClient.ts    # Overpass mirrors, timeout, User-Agent
+│   │   │   └── tileCache.ts         # Memory/store/network/bundled tile layers
 │   │   ├── audio/
 │   │   ├── storage/
 │   │   └── backend/             # Client for a remote backend; not server code
@@ -329,6 +371,9 @@ car-assistant-wolfhacks/
 │   ├── event-schema.md
 │   └── demo.md
 ├── scripts/                     # Development and data-conversion utilities
+│   ├── try-location.mts         # Location dev tools, see Section 7
+│   ├── try-highway.mts
+│   └── verify-signs.mts
 ├── app.config.ts
 ├── eas.json
 ├── expo-env.d.ts
@@ -397,7 +442,7 @@ We can't drive drunk or crash a car on stage, so the demo is built to be safe an
 2. Record data; write the replay source
 3. Signal pipeline (calibration, windowing, features) + crash detector
 4. Train the anomaly model in Python; export; run it on the phone
-5. Overpass tiling + stop-sign state machine
+5. Overpass tiling, stop-sign / traffic-light announcements, highway merge/exit coaching (done), stop-sign compliance state machine
 6. ElevenLabs alerts + notifications
 7. Gemini Live conversation (direct token, or proxied if tokens are unsupported)
 8. Cloud service: trip ingest, Gemini trip report, token minting
@@ -438,8 +483,8 @@ Split by area, not by layer, so each person owns a vertical slice with minimal b
 2. Record normal drives and staged weaving laps using A's recording tool. Until it exists, use phone IMU or synthetic data to start.
 3. Feature extraction in Python, then the same in TypeScript, with **shared test vectors** so they match.
 4. Train the Isolation Forest baseline, evaluate on held-out drives, export to ONNX; fall back to a small TypeScript model if ONNX is a pain on the phone. Measure on-device inference time.
-5. Overpass client, 1-mile tile cache and prefetch, bearing/distance filtering.
-6. Stop-sign state machine (`approaching`, `ok`, `rolling`, `ran`) and the demo route data.
+5. Overpass client, 1-mile tile cache and prefetch, bearing/distance filtering. **Done.**
+6. Location coach: stop-sign and traffic-light announcements, highway merge/exit speed coaching. **Done.** Still to do: the stop-sign compliance state machine (`approaching`, `ok`, `rolling`, `ran`) and bundled demo-route tiles.
 7. Evaluation write-up: false alarms per hour, staged-weave precision/recall, what it does and does not claim.
 
 ### Person C: Voice + Cloud + Data
@@ -456,7 +501,7 @@ Split by area, not by layer, so each person owns a vertical slice with minimal b
 |---|---|---|
 | Hour 0–2 | Agree the TypeScript types, event names and cloud JSON schema in `docs/contracts.md` | All |
 | After A's recorder ships | B starts real data collection | A → B |
-| After B's `DriveEvent`s work | C wires events to voice | B → C |
+| After B's `DriveEvent`s work | C wires events to voice (location events are ready: see Section 9) | B → C |
 | After A's `sync/` exists | C's `/trips` and `/model/latest` get real clients | A ↔ C |
 | Final stretch | Full-system integration, demo rehearsal, fallbacks | All |
 
@@ -471,7 +516,7 @@ Split by area, not by layer, so each person owns a vertical slice with minimal b
 | **5. Polish** | Demo UX, background behavior | Tune thresholds on real drives | Fallback assets, demo script |
 
 ### Working agreements
-- Branch per person (`a/…`, `b/…`, `c/…`), small PRs into `main`, no force-pushes.
+- Branch per person (`a/…`, `b/…`, `c/…`; Person B works on `person-b`), small PRs into `main`, no force-pushes.
 - Mocks first: A provides a fake event source, C provides a mock cloud, so nobody waits for another person's work.
 - One person (suggest A) owns the demo device and final build; freeze features at a set time before judging.
 - Cut order if time runs short: Databricks retraining, then OTA model updates, then weekly summaries, then Gemini Live. The real-time path (A + B + the voice module) is never cut.
