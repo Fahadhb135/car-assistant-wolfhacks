@@ -1,8 +1,15 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Button, Card, Divider, Surface, Text } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import {
+  getStoredTrip,
+  subscribeToTrips,
+  uploadStoredTrip,
+  type StoredTrip,
+} from '@/features/driving-session/tripStore';
 import { colors } from '@/theme';
 
 const metrics = [
@@ -11,13 +18,43 @@ const metrics = [
   { value: '0', label: 'Harsh brakes' },
 ];
 
-const events = [
+const demoEvents = [
   { time: '2:14', title: 'Smooth start', detail: 'Gentle acceleration', tone: 'good' },
   { time: '11:08', title: 'Sharp corner', detail: 'A little quick on the turn', tone: 'warn' },
   { time: '18:42', title: 'Complete stop', detail: 'Nice approach and full stop', tone: 'good' },
 ];
 
+function formatEventTime(elapsedMs: number): string {
+  const seconds = Math.max(0, Math.floor(elapsedMs / 1_000));
+  return `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`;
+}
+
 export default function TripSummaryRoute() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const [stored, setStored] = useState<StoredTrip | undefined>(() => getStoredTrip(id));
+
+  useEffect(() => {
+    setStored(getStoredTrip(id));
+    return subscribeToTrips(() => setStored(getStoredTrip(id)));
+  }, [id]);
+
+  const events = stored
+    ? stored.trip.events.map((event) => ({
+        time: formatEventTime(event.t - stored.trip.start),
+        title: event.kind === 'crash' ? 'Possible crash' : 'Unsteady driving',
+        detail: event.kind === 'crash' ? 'Safety check requested' : 'Motion candidate detected',
+        tone: 'warn',
+      }))
+    : demoEvents;
+  const score = stored?.trip.scores.smoothness ?? 88;
+  const displayedMetrics = stored
+    ? [
+        { value: String(score), label: 'Smoothness' },
+        { value: String(events.length), label: 'Motion events' },
+        { value: String(Math.max(1, Math.round((stored.trip.end - stored.trip.start) / 60_000))), label: 'Minutes' },
+      ]
+    : metrics;
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -29,14 +66,40 @@ export default function TripSummaryRoute() {
 
         <View style={styles.scoreSection}>
           <Text variant="labelLarge" style={styles.eyebrow}>TODAY’S DRIVE</Text>
-          <Text style={styles.score}>88</Text>
-          <Text variant="headlineSmall" style={styles.scoreTitle}>A confident drive</Text>
-          <Text variant="bodyLarge" style={styles.scoreSubtitle}>24 min · 8.4 miles · Campus loop</Text>
+          <Text style={styles.score}>{score}</Text>
+          <Text variant="headlineSmall" style={styles.scoreTitle}>
+            {stored ? 'Trip captured' : 'A confident drive'}
+          </Text>
+          <Text variant="bodyLarge" style={styles.scoreSubtitle}>
+            {stored ? `${Math.max(1, Math.round((stored.trip.end - stored.trip.start) / 60_000))} min · live SensorTile drive` : '24 min · 8.4 miles · Campus loop'}
+          </Text>
         </View>
+
+        {stored ? (
+          <Surface style={styles.uploadCard} elevation={0}>
+            <Text variant="titleMedium" style={styles.sectionTitle}>
+              {stored.uploadState === 'uploaded'
+                ? 'Trip sent for Gemini analysis'
+                : stored.uploadState === 'uploading'
+                  ? 'Sending trip…'
+                  : 'Trip saved on this phone'}
+            </Text>
+            {stored.uploadError ? <Text style={styles.uploadError}>{stored.uploadError}</Text> : null}
+            {stored.uploadState === 'failed' ? (
+              <Button
+                compact
+                mode="outlined"
+                onPress={() => void uploadStoredTrip(id, process.env.EXPO_PUBLIC_API_URL)}
+              >
+                Retry upload
+              </Button>
+            ) : null}
+          </Surface>
+        ) : null}
 
         <Card style={styles.metricsCard} mode="contained">
           <Card.Content style={styles.metricsRow}>
-            {metrics.map((metric, index) => (
+            {displayedMetrics.map((metric, index) => (
               <View key={metric.label} style={styles.metricGroup}>
                 {index > 0 ? <Divider style={styles.metricDivider} /> : null}
                 <View style={styles.metric}>
@@ -54,13 +117,15 @@ export default function TripSummaryRoute() {
             <Text variant="titleLarge" style={styles.sectionTitle}>Coach’s note</Text>
           </View>
           <Text variant="bodyLarge" style={styles.coachText}>
-            Your speed stayed steady and every stop was complete. Ease into sharper turns a little earlier to make the ride even smoother.
+            {stored
+              ? 'Motion events are experimental candidates, not confirmed crashes or validated safety detections. Review them alongside what happened during the drive.'
+              : 'Your speed stayed steady and every stop was complete. Ease into sharper turns a little earlier to make the ride even smoother.'}
           </Text>
         </Surface>
 
         <View style={styles.sectionHeader}>
           <Text variant="titleLarge" style={styles.sectionTitle}>Drive moments</Text>
-          <Text variant="labelLarge" style={styles.eventCount}>3 EVENTS</Text>
+          <Text variant="labelLarge" style={styles.eventCount}>{events.length} EVENTS</Text>
         </View>
 
         <Card style={styles.timelineCard} mode="contained">
@@ -89,7 +154,9 @@ export default function TripSummaryRoute() {
         >
           Done
         </Button>
-        <Text variant="bodySmall" style={styles.localNote}>Trip data is stored locally on this phone.</Text>
+        <Text variant="bodySmall" style={styles.localNote}>
+          {stored ? 'This trip remains available for retry during the current app session.' : 'Trip data is stored locally on this phone.'}
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -134,4 +201,6 @@ const styles = StyleSheet.create({
   doneButtonContent: { height: 54 },
   doneButtonLabel: { fontSize: 16, fontWeight: '800' },
   localNote: { color: colors.muted, textAlign: 'center' },
+  uploadCard: { backgroundColor: colors.paper, borderRadius: 18, gap: 8, padding: 16 },
+  uploadError: { color: '#7A2020' },
 });

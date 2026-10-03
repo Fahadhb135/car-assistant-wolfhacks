@@ -9,6 +9,7 @@ export default function RootLayout() {
     <PaperProvider theme={appTheme}>
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.cream } }}>
         <Stack.Screen name="index" />
+        <Stack.Screen name="sensor-setup" options={{ gestureEnabled: true }} />
         <Stack.Screen name="drive" options={{ gestureEnabled: false }} />
         <Stack.Screen name="trips/[id]" />
         <Stack.Screen

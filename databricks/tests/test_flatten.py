@@ -6,7 +6,7 @@ TRIP = {
     "events": [
         {"eventId": "e1", "t": 5, "kind": "rolling_stop", "lat": 43.47012, "lon": -80.54049},
         {"eventId": "e2", "t": 6, "kind": "stop_ok"},
-        {"eventId": "e3", "t": 7, "kind": "crash", "lat": 43.47, "lon": -80.54},
+        {"eventId": "e3", "t": 7, "kind": "crash", "confirmed": False, "lat": 43.47, "lon": -80.54},
     ],
     "features": [[1, 2], [3, 4]],
 }
@@ -14,8 +14,14 @@ TRIP = {
 
 def test_trip_row_summarises():
     t, _, _ = flatten_trip(TRIP)
-    assert t["durationS"] == 60 and t["nEvents"] == 3 and t["nBadEvents"] == 2 and t["hadCrash"] is True
+    assert t["durationS"] == 60 and t["nEvents"] == 3 and t["nBadEvents"] == 2
+    assert t["hadCrash"] is False  # an unconfirmed motion candidate is not a confirmed crash
     assert t["smoothness"] == 82
+
+
+def test_confirmed_crash_sets_trip_flag():
+    confirmed = {**TRIP, "events": [{"eventId": "c", "t": 8, "kind": "crash", "confirmed": True}]}
+    assert flatten_trip(confirmed)[0]["hadCrash"] is True
 
 
 def test_event_rows_flag_bad_and_grid():
@@ -23,6 +29,7 @@ def test_event_rows_flag_bad_and_grid():
     assert [e["isBad"] for e in ev] == [True, False, True]
     assert ev[0]["gridCell"] == "43.470,-80.540"
     assert ev[1]["gridCell"] is None
+    assert ev[2]["confirmed"] is False
 
 
 def test_nearby_events_share_a_cell_far_ones_do_not():

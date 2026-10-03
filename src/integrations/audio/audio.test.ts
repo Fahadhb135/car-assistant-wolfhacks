@@ -201,7 +201,8 @@ describe('speaker chain on the phone', () => {
   it('a safety alert cuts off the clip that is playing, end to end', async () => {
     const f = fakeBackend();
     const assets = { erratic_driving: 1, crash_check: 2 };
-    const chain = buildSpeakerChain(assets, new ExpoAudioPlayer(f.backend), new ExpoSpeechTts(new FakeSpeech()));
+    const speech = new FakeSpeech();
+    const chain = buildSpeakerChain(assets, new ExpoAudioPlayer(f.backend), new ExpoSpeechTts(speech));
     const voice = new VoiceCoordinator({ speaker: chain, live: { isActive: () => false, pause() {}, resume() {}, end() {} }, now: () => 0 });
     voice.handleEvent(ev({ kind: 'erratic_driving', severity: 'warn', score: 1 }, 0));
     await flush();
@@ -209,7 +210,10 @@ describe('speaker chain on the phone', () => {
     voice.handleEvent(ev({ kind: 'crash', severity: 'critical', confirmed: false }, 0));
     await flush();
     expect(f.handles[0]!.log).toEqual(['play', 'stop', 'release']); // erratic clip cut off
-    expect(f.created).toEqual([1, 2]); // crash clip started
-    expect(PHRASES.crash_check).toBeTruthy();
+    // An unconfirmed heuristic candidate deliberately avoids the old "Crash detected" clip and
+    // uses device TTS for the accurately qualified "Possible crash" safety check.
+    expect(f.created).toEqual([1]);
+    expect(speech.spoken).toEqual([PHRASES.crash_check]);
+    speech.cb!.onDone();
   });
 });

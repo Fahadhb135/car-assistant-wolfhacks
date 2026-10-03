@@ -27,7 +27,8 @@ def flatten_trip(trip: dict) -> tuple[dict, list[dict], list[dict]]:
         "stopCompliance": scores.get("stopCompliance"),
         "nEvents": len(events),
         "nBadEvents": sum(1 for e in events if e["kind"] in BAD_KINDS),
-        "hadCrash": any(e["kind"] == "crash" for e in events),
+        # A heuristic motion candidate must never become a confirmed crash in analytics.
+        "hadCrash": any(e["kind"] == "crash" and e.get("confirmed") is True for e in events),
     }
     event_rows = [
         {
@@ -40,6 +41,7 @@ def flatten_trip(trip: dict) -> tuple[dict, list[dict], list[dict]]:
             "lat": e.get("lat"),
             "lon": e.get("lon"),
             "score": e.get("score"),
+            "confirmed": e.get("confirmed"),
             "gridCell": grid_cell(e.get("lat"), e.get("lon")),
         }
         for e in events

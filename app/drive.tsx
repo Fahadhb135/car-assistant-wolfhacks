@@ -4,12 +4,20 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { Button, Dialog, Portal, Surface, Text } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { CLEAR_ROAD, type CoachMessage } from '@/features/driving-session/coachMessage';
+import type { CoachMessage } from '@/features/driving-session/coachMessage';
 import { CoachChatBar } from '@/features/driving-session/CoachChatBar';
+import {
+  createTripId,
+  getAnonymousDriverId,
+  saveTrip,
+  uploadStoredTrip,
+} from '@/features/driving-session/tripStore';
 import { useCoachChat, type CoachChatApi } from '@/features/driving-session/useCoachChat';
 import { useDriveVoice } from '@/features/driving-session/useDriveVoice';
+import { useLiveImuDrive } from '@/features/driving-session/useLiveImuDrive';
 import { useReplayDrive } from '@/features/driving-session/useReplayDrive';
 import { POLICIES } from '@/features/voice/phrases';
+import { buildCloudTrip } from '@/integrations/backend/tripUpload';
 import { colors } from '@/theme';
 
 /** Card tint per coaching tone (calm keeps the original cream). */
@@ -27,17 +35,59 @@ function formatTime(totalSeconds: number) {
 }
 
 export default function DriveRoute() {
-  const { mode } = useLocalSearchParams<{ mode?: string }>();
+  const { mode, deviceId, deviceName } = useLocalSearchParams<{
+    mode?: string;
+    deviceId?: string;
+    deviceName?: string;
+  }>();
+  const replayMode = mode === 'replay';
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [confirmEnd, setConfirmEnd] = useState(false);
-  // Replay mode runs the real coaching + voice code on a bundled route; live mode keeps the static card for now.
+  const [ending, setEnding] = useState(false);
+  const startedAtRef = useRef(Date.now());
   // A safety alert (anything outranking a chat reply) stops the passenger's listening, so the alert is heard cleanly.
   const chatRef = useRef<CoachChatApi | null>(null);
-  const voice = useDriveVoice((alert) => alert.priority > POLICIES.chat_reply.priority && chatRef.current?.cancel());
-  const replay = useReplayDrive(mode === 'replay', voice);
-  const chat = useCoachChat(voice, useCallback(() => replay.eventsRef.current, [replay.eventsRef]));
+  const voice = useDriveVoice(
+    (alert) => alert.priority > POLICIES.chat_reply.priority && chatRef.current?.cancel(),
+  );
+  const replay = useReplayDrive(replayMode, voice);
+  const live = useLiveImuDrive(!replayMode, deviceId, voice);
+  const getEvents = useCallback(
+    () => (replayMode ? replay.eventsRef.current : live.eventsRef.current),
+    [live.eventsRef, replay.eventsRef, replayMode],
+  );
+  const chat = useCoachChat(voice, getEvents);
   chatRef.current = chat;
-  const coach = mode === 'replay' ? replay.coach : CLEAR_ROAD;
+  const coach = replayMode ? replay.coach : live.coach;
+  const sensorValue = replayMode
+    ? 'Replay'
+    : live.status === 'running'
+      ? deviceName ?? 'Connected'
+      : live.status === 'error'
+        ? 'Error'
+        : live.status === 'connecting' || live.status === 'starting'
+          ? 'Connecting…'
+          : 'Stopped';
+
+  async function endDrive(): Promise<void> {
+    if (ending) return;
+    setEnding(true);
+    if (!replayMode) await live.stop();
+
+    const endedAt = Date.now();
+    const tripId = createTripId(endedAt);
+    const trip = buildCloudTrip({
+      tripId,
+      driverId: getAnonymousDriverId(),
+      start: startedAtRef.current,
+      end: endedAt,
+      events: getEvents(),
+    });
+    saveTrip(trip);
+    const upload = uploadStoredTrip(tripId, process.env.EXPO_PUBLIC_API_URL);
+    router.replace({ pathname: '/trips/[id]', params: { id: tripId } });
+    void upload;
+  }
 
   useEffect(() => {
     const timer = setInterval(() => setElapsedSeconds((current) => current + 1), 1_000);
@@ -51,7 +101,7 @@ export default function DriveRoute() {
           <View style={styles.livePill}>
             <View style={styles.liveDot} />
             <Text variant="labelLarge" style={styles.liveText}>
-              {mode === 'replay' ? 'REPLAY ACTIVE' : 'DRIVE ACTIVE'}
+              {replayMode ? 'REPLAY ACTIVE' : 'DRIVE ACTIVE'}
             </Text>
           </View>
           <Text variant="titleMedium" style={styles.timer}>{formatTime(elapsedSeconds)}</Text>
@@ -80,6 +130,10 @@ export default function DriveRoute() {
           </View>
         </Surface>
 
+        {live.error && !replayMode ? (
+          <Text variant="bodySmall" style={styles.sensorError}>{live.error}</Text>
+        ) : null}
+
         <CoachChatBar chat={chat} />
 
         <View style={styles.signalRow}>
@@ -87,7 +141,7 @@ export default function DriveRoute() {
             <View style={styles.okDot} />
             <View>
               <Text variant="labelMedium" style={styles.signalLabel}>SENSOR</Text>
-              <Text variant="bodyMedium" style={styles.signalValue}>Connected</Text>
+              <Text variant="bodyMedium" style={styles.signalValue}>{sensorValue}</Text>
             </View>
           </View>
           <View style={styles.signalItem}>
@@ -111,6 +165,8 @@ export default function DriveRoute() {
           textColor={colors.white}
           style={styles.endButton}
           contentStyle={styles.endButtonContent}
+          disabled={ending}
+          loading={ending}
           onPress={() => setConfirmEnd(true)}
         >
           End drive
@@ -128,7 +184,7 @@ export default function DriveRoute() {
           </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={() => setConfirmEnd(false)}>Keep driving</Button>
-            <Button onPress={() => router.replace('/trips/demo')}>End drive</Button>
+            <Button disabled={ending} onPress={() => void endDrive()}>End drive</Button>
           </Dialog.Actions>
         </Dialog>
       </Portal>
@@ -167,4 +223,5 @@ const styles = StyleSheet.create({
   endButton: { borderColor: '#739080', borderRadius: 14 },
   endButtonContent: { height: 50 },
   safetyNote: { color: '#789081', lineHeight: 17, paddingHorizontal: 18, textAlign: 'center' },
+  sensorError: { backgroundColor: '#F6D5D5', borderRadius: 10, color: '#7A2020', padding: 10 },
 });
