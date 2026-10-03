@@ -1,0 +1,35 @@
+{
+  "source": "bundled-demo",
+  "generatedAt": 1791000000000,
+  "demo": true,
+  "hotspots": [
+    {
+      "cell": "35.78468,-78.63291",
+      "lat": 35.784685,
+      "lon": -78.632911,
+      "bad": 16,
+      "trips": 16,
+      "drivers": 5,
+      "byKind": {
+        "rolling_stop": 14,
+        "ran_stop": 2
+      },
+      "topKind": "rolling_stop",
+      "demo": true
+    },
+    {
+      "cell": "35.78597,-78.63287",
+      "lat": 35.785966,
+      "lon": -78.63287,
+      "bad": 16,
+      "trips": 16,
+      "drivers": 5,
+      "byKind": {
+        "ran_stop": 10,
+        "rolling_stop": 6
+      },
+      "topKind": "ran_stop",
+      "demo": true
+    }
+  ]
+}
