@@ -44,6 +44,13 @@ test('reassembles board responses that have no length field', () => {
   assert.equal(assembler.push(Uint8Array.of(0x20, ...encode('{"ok":true}'))), '{"ok":true}');
 });
 
+test('strips the NUL terminator the firmware appends to responses', () => {
+  const assembler = new StPnplResponseAssembler();
+  const response = assembler.push(Uint8Array.of(0x20, ...encode('{"PnPL_Response":{"status":true}}'), 0x00));
+  assert.equal(response, '{"PnPL_Response":{"status":true}}');
+  assert.doesNotThrow(() => JSON.parse(response ?? ''));
+});
+
 test('ignores continuation packets without a start', () => {
   const assembler = new StPnplResponseAssembler();
   assert.equal(assembler.push(Uint8Array.of(0x80, ...encode('}'))), null);
