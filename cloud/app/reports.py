@@ -3,6 +3,7 @@ against the trip, and a deterministic template covers Gemini being down."""
 import json
 from typing import Callable, Optional
 
+from .gemini_util import call_with_fallback
 from .schemas import Issue, Report, Trip
 
 # (trip_json, schema_class) -> Report JSON string. Injected so tests need no network.
@@ -61,20 +62,22 @@ def make_report(trip: Trip, gemini: Optional[GeminiFn]) -> Report:
     return template_report(trip)
 
 
-def gemini_from_env(api_key: str, model: str) -> GeminiFn:
+def gemini_from_env(api_key: str, models: list[str]) -> GeminiFn:
     from google import genai
     from google.genai import types
 
     client = genai.Client(api_key=api_key)
 
     def call(prompt: str) -> Optional[str]:
-        resp = client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json", response_schema=Report
-            ),
-        )
-        return resp.text
+        def one(model: str) -> Optional[str]:
+            return client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json", response_schema=Report
+                ),
+            ).text
+
+        return call_with_fallback(models, one)
 
     return call

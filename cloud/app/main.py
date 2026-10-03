@@ -14,6 +14,8 @@ from .model_registry import PATTERN, latest_model
 from .reports import GeminiFn, gemini_from_env, make_report
 from .schemas import ModelInfo, Report, Trip
 
+CLOUD_DIR = Path(__file__).resolve().parent.parent  # defaults live under cloud/ however we're launched
+
 LiveTokenFn = Callable[[], str]
 
 
@@ -49,14 +51,19 @@ def create_app(
     sink: Optional[DatabricksSink] = None,
 ) -> FastAPI:
     app = FastAPI(title="Car Assistant cloud")
-    store = TripStore(db_path or os.environ.get("TRIPS_DB", "cloud/data/trips.db"))
-    folder = models_dir or Path(os.environ.get("MODELS_DIR", "cloud/models"))
+    store = TripStore(db_path or os.environ.get("TRIPS_DB") or str(CLOUD_DIR / "data" / "trips.db"))
+    folder = models_dir or Path(os.environ.get("MODELS_DIR") or CLOUD_DIR / "models")
 
     key = os.environ.get("GEMINI_API_KEY")
+    models = [
+        m.strip()
+        for m in os.environ.get("GEMINI_MODEL", "gemini-flash-latest,gemini-flash-lite-latest").split(",")
+        if m.strip()
+    ]
     if gemini is None and key:
-        gemini = gemini_from_env(key, os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"))
+        gemini = gemini_from_env(key, models)
     if chat is None and key:
-        chat = chat_from_env(key, os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"))
+        chat = chat_from_env(key, models)
     if live_token is None and key:
         live_token = live_token_from_env(key)
 

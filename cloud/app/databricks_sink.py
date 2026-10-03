@@ -14,6 +14,9 @@ SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 class DatabricksSink:
     def __init__(self, host: str, token: str, volume_path: str, client: Optional[httpx.Client] = None):
+        host = host.strip()
+        if not host.startswith(("http://", "https://")):
+            host = "https://" + host
         self.host = host.rstrip("/")
         self.token = token
         self.volume_path = volume_path.rstrip("/")

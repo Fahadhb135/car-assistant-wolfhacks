@@ -4,6 +4,8 @@ from typing import Callable, Optional
 
 from pydantic import BaseModel, Field
 
+from .gemini_util import call_with_fallback
+
 ChatFn = Callable[[str, str], Optional[str]]  # (system_instruction, user_message) -> reply
 
 RULES = (
@@ -52,18 +54,20 @@ def answer(req: ChatRequest, chat: Optional[ChatFn]) -> str:
     return FALLBACK
 
 
-def chat_from_env(api_key: str, model: str) -> ChatFn:
+def chat_from_env(api_key: str, models: list[str]) -> ChatFn:
     from google import genai
     from google.genai import types
 
     client = genai.Client(api_key=api_key)
 
     def call(system: str, message: str) -> Optional[str]:
-        resp = client.models.generate_content(
-            model=model,
-            contents=message,
-            config=types.GenerateContentConfig(system_instruction=system, max_output_tokens=120),
-        )
-        return resp.text
+        def one(model: str) -> Optional[str]:
+            return client.models.generate_content(
+                model=model,
+                contents=message,
+                config=types.GenerateContentConfig(system_instruction=system, max_output_tokens=200),
+            ).text
+
+        return call_with_fallback(models, one, attempts=2, delay=0.4)
 
     return call

@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test:ble": "tsx --test src/integrations/bluetooth/*.test.ts",
     "test:voice": "vitest run",
-    "phrases": "tsx scripts/generate-phrases.ts"
+    "phrases": "tsx scripts/generate-phrases.mts"
   },
   "dependencies": {
     "base64-js": "^1.5.1",
