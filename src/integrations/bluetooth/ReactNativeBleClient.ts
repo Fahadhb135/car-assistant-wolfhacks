@@ -12,6 +12,7 @@ import type {
   BluetoothDeviceSummary,
   BluetoothErrorListener,
   BluetoothScanListener,
+  GattCharacteristicTarget,
   GattServiceSnapshot,
   RawPacketListener,
 } from './types';
@@ -164,48 +165,60 @@ export class ReactNativeBleClient implements BluetoothClient {
     onPacket: RawPacketListener,
     onError: BluetoothErrorListener,
   ): Promise<number> {
+    const targets: GattCharacteristicTarget[] = [];
+    for (const service of this.gattServices) {
+      for (const characteristic of service.characteristics) {
+        if (characteristic.isNotifiable || characteristic.isIndicatable) {
+          targets.push({ serviceUuid: service.uuid, characteristicUuid: characteristic.uuid });
+        }
+      }
+    }
+    return this.monitorCharacteristics(targets, onPacket, onError);
+  }
+
+  async monitorCharacteristics(
+    targets: readonly GattCharacteristicTarget[],
+    onPacket: RawPacketListener,
+    onError: BluetoothErrorListener,
+  ): Promise<number> {
     if (!this.connectedDevice) {
       throw new Error('Connect to a Bluetooth device before monitoring notifications.');
     }
 
     this.removeNotificationSubscriptions();
+    for (const target of targets) {
+      const subscription = this.manager.monitorCharacteristicForDevice(
+        this.connectedDevice.id,
+        target.serviceUuid,
+        target.characteristicUuid,
+        (error, updatedCharacteristic) => {
+          if (error) {
+            onError(new Error(`${target.characteristicUuid}: ${error.message}`));
+            return;
+          }
+          if (!updatedCharacteristic?.value) {
+            return;
+          }
 
-    for (const service of this.gattServices) {
-      for (const characteristic of service.characteristics) {
-        if (!characteristic.isNotifiable && !characteristic.isIndicatable) {
-          continue;
-        }
-
-        const subscription = this.manager.monitorCharacteristicForDevice(
-          this.connectedDevice.id,
-          service.uuid,
-          characteristic.uuid,
-          (error, updatedCharacteristic) => {
-            if (error) {
-              onError(new Error(`${characteristic.uuid}: ${error.message}`));
-              return;
-            }
-            if (!updatedCharacteristic?.value) {
-              return;
-            }
-
-            const bytes = base64ToBytes(updatedCharacteristic.value);
-            onPacket({
-              receivedMonotonicMs: monotonicNow(),
-              serviceUuid: service.uuid,
-              characteristicUuid: characteristic.uuid,
-              valueBase64: updatedCharacteristic.value,
-              valueHex: bytesToHex(bytes),
-              byteLength: bytes.byteLength,
-            });
-          },
-        );
-
-        this.notificationSubscriptions.push(subscription);
-      }
+          const bytes = base64ToBytes(updatedCharacteristic.value);
+          onPacket({
+            receivedMonotonicMs: monotonicNow(),
+            serviceUuid: target.serviceUuid,
+            characteristicUuid: target.characteristicUuid,
+            valueBase64: updatedCharacteristic.value,
+            valueHex: bytesToHex(bytes),
+            byteLength: bytes.byteLength,
+          });
+        },
+      );
+      this.notificationSubscriptions.push(subscription);
     }
 
     return this.notificationSubscriptions.length;
+  }
+
+  async stopMonitoring(): Promise<void> {
+    this.removeNotificationSubscriptions();
   }
 
   async writeWithoutResponse(
@@ -226,7 +239,7 @@ export class ReactNativeBleClient implements BluetoothClient {
   }
 
   async disconnect(): Promise<void> {
-    this.removeNotificationSubscriptions();
+    await this.stopMonitoring();
 
     const device = this.connectedDevice;
     this.connectedDevice = null;
