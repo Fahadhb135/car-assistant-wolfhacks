@@ -11,9 +11,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+  filterByProximity,
+  PROXIMITY_MIN_RSSI,
   ReactNativeBleClient,
   StreamMetrics,
   type BluetoothDeviceSummary,
+  type ProximityFilter,
   type GattServiceSnapshot,
   type RawBlePacket,
 } from '@/integrations/bluetooth';
@@ -26,6 +29,12 @@ const EMPTY_METRICS: StreamMetricsSnapshot = {
   largestInterarrivalGapMs: 0,
   monitoredCharacteristicCount: 0,
 };
+
+const PROXIMITY_OPTIONS: readonly { value: ProximityFilter; label: string }[] = [
+  { value: 'veryClose', label: 'Very close' },
+  { value: 'nearby', label: 'Nearby' },
+  { value: 'all', label: 'All' },
+];
 
 export function BluetoothDiagnosticScreen() {
   const clientRef = useRef<ReactNativeBleClient | null>(null);
@@ -40,6 +49,7 @@ export function BluetoothDiagnosticScreen() {
   const [packets, setPackets] = useState<readonly RawBlePacket[]>([]);
   const [metrics, setMetrics] = useState<StreamMetricsSnapshot>(EMPTY_METRICS);
   const [busy, setBusy] = useState(false);
+  const [proximity, setProximity] = useState<ProximityFilter>('nearby');
 
   if (!clientRef.current && Platform.OS !== 'web') {
     clientRef.current = new ReactNativeBleClient();
@@ -58,14 +68,10 @@ export function BluetoothDiagnosticScreen() {
     };
   }, []);
 
+  const allDevices = useMemo(() => Object.values(devices), [devices]);
   const sortedDevices = useMemo(
-    () =>
-      Object.values(devices).sort((left, right) => {
-        const leftName = left.localName ?? left.name ?? '';
-        const rightName = right.localName ?? right.name ?? '';
-        return leftName.localeCompare(rightName);
-      }),
-    [devices],
+    () => filterByProximity(allDevices, proximity),
+    [allDevices, proximity],
   );
 
   async function startScan() {
@@ -175,7 +181,33 @@ export function BluetoothDiagnosticScreen() {
           <Button title="Stop scan" onPress={stopScan} />
         </View>
 
-        <Text style={styles.sectionHeading}>Discovered devices ({sortedDevices.length})</Text>
+        <Text style={styles.sectionHeading}>Range</Text>
+        <View style={styles.proximityRow}>
+          {PROXIMITY_OPTIONS.map((option) => {
+            const selected = option.value === proximity;
+            const minRssi = PROXIMITY_MIN_RSSI[option.value];
+            return (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                key={option.value}
+                onPress={() => setProximity(option.value)}
+                style={[styles.proximityOption, selected && styles.proximityOptionSelected]}
+              >
+                <Text style={selected ? styles.proximityLabelSelected : undefined}>
+                  {option.label}
+                </Text>
+                <Text style={[styles.proximityHint, selected && styles.proximityLabelSelected]}>
+                  {minRssi === null ? 'any signal' : `≥ ${minRssi} dBm`}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Text style={styles.sectionHeading}>
+          Discovered devices ({sortedDevices.length} of {allDevices.length}, strongest first)
+        </Text>
         {sortedDevices.map((device) => (
           <Pressable
             accessibilityRole="button"
@@ -248,6 +280,11 @@ const styles = StyleSheet.create({
   heading: { fontSize: 20, fontWeight: '700' },
   sectionHeading: { fontSize: 16, fontWeight: '700', marginTop: 12 },
   actions: { gap: 8 },
+  proximityRow: { flexDirection: 'row', gap: 8 },
+  proximityOption: { alignItems: 'center', borderColor: '#999', borderRadius: 6, borderWidth: 1, flex: 1, padding: 8 },
+  proximityOptionSelected: { backgroundColor: '#1565c0', borderColor: '#1565c0' },
+  proximityLabelSelected: { color: '#fff', fontWeight: '700' },
+  proximityHint: { fontSize: 12, opacity: 0.7 },
   error: { color: '#b00020' },
   device: { borderColor: '#999', borderRadius: 6, borderWidth: 1, gap: 4, padding: 12 },
   deviceName: { fontWeight: '700' },
