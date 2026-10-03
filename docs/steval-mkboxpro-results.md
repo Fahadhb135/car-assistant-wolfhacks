@@ -2,7 +2,7 @@
 
 Results from the BLE diagnostic in [bluetooth.md](bluetooth.md), captured on 2026-10-03 with an iPhone 16 Pro Max (iOS 26.6.1) running the Expo dev build.
 
-> Status: GATT layout captured. Notification, packet and stream-metric results are **pending**; sections marked _pending_ are filled in after the monitoring step.
+> Status: GATT layout captured. Subscribing to all 7 notifiable characteristics produced **no packets**: the board, advertising as `HSD2v34`, appears to be running ST's High Speed Datalog 2 firmware, which likely waits for a start command. Packet and stream-metric results are still pending.
 
 ## Firmware
 
@@ -10,7 +10,9 @@ Results from the BLE diagnostic in [bluetooth.md](bluetooth.md), captured on 202
 |---|---|
 | Board model | STEVAL-MKBOXPRO |
 | Factory firmware version | v3.4.0 |
-| Advertised device name | _pending: copy from the scan list_ |
+| Advertised device name | `HSD2v34` (suggests High Speed Datalog 2 firmware, v3.4) |
+| RSSI at capture | −57 dBm |
+| Manufacturer data | `30 00 02 13 0d 00 00 00 d0 19 a6 e6 91 b9` (company ID `0x0030` = STMicroelectronics; the last six bytes look like the board's address) |
 
 ## GATT layout
 
@@ -25,13 +27,13 @@ The feature characteristics use the `…-0002-11e1-ac36-…` family, where the f
 
 | Characteristic | Service | Read | Write | Notify | Packets? | Changes with motion? |
 |---|---|---|---|---|---|---|
-| `00000001-000e-11e1-ac36-0002a5d5c51b` | `00000000-000e-11e1…` | yes | with response + without response | yes | _pending_ | _pending_ |
-| `00000002-000e-11e1-ac36-0002a5d5c51b` | `00000000-000e-11e1…` | yes | no | yes | _pending_ | _pending_ |
-| `00000014-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | without response | yes | _pending_ | _pending_ |
-| `0000001b-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | without response | yes | _pending_ | _pending_ |
-| `0000000f-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | yes | no | yes | _pending_ | _pending_ |
-| `00000011-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | without response | yes | _pending_ | _pending_ |
-| `00000023-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | no | yes | _pending_ | _pending_ |
+| `00000001-000e-11e1-ac36-0002a5d5c51b` | `00000000-000e-11e1…` | yes | with response + without response | yes | none (first run) | no |
+| `00000002-000e-11e1-ac36-0002a5d5c51b` | `00000000-000e-11e1…` | yes | no | yes | none (first run) | no |
+| `00000014-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | without response | yes | none (first run) | no |
+| `0000001b-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | without response | yes | none (first run) | no |
+| `0000000f-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | yes | no | yes | none (first run) | no |
+| `00000011-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | without response | yes | none (first run) | no |
+| `00000023-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | no | yes | none (first run) | no |
 
 ### Raw snapshot
 
@@ -117,25 +119,27 @@ The `[BLE GATT snapshot]` entry from Metro:
 
 ## Notification results
 
-_Pending._ Tap **Monitor notifiable characteristics**, keep the board still for a few seconds, then move and rotate it.
+First run (2026-10-03): the app subscribed to all 7 notifiable characteristics and received **0 packets** while the board was still and while it was moved.
 
-- Characteristics monitored: _pending_
-- UUIDs producing packets: _pending_
-- UUIDs that change when the board moves: _pending_
+- Characteristics monitored: 7
+- UUIDs producing packets: none
+- UUIDs that change when the board moves: none
+
+The diagnostic hid subscription errors at the time, so a failed subscription could not be ruled out; it now reports them as `[BLE monitor error]`. The other likely cause is the firmware: with `HSD2v34`, streaming probably has to be started by a command written to one of the writable feature characteristics (`0x11`, `0x14` or `0x1b`) rather than by subscribing alone.
 
 ## First packets
 
-_Pending:_ the `[BLE packet]` entries (up to 20) from Metro.
+None received yet.
 
 ## Stream metrics
 
 | Metric | Value |
 |---|---|
-| Packets | _pending_ |
-| Bytes | _pending_ |
-| Packets per second | _pending_ |
-| Largest packet gap | _pending_ |
+| Packets | 0 |
+| Bytes | 0 |
+| Packets per second | 0.0 |
+| Largest packet gap | 0.0 ms |
 
 ## Errors
 
-None during scanning, connection or service discovery.
+None shown during scanning, connection, service discovery or monitoring. Monitoring errors were not surfaced on the first run (see above).

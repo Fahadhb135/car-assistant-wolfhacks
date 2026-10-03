@@ -12,7 +12,10 @@ export interface BluetoothClient {
   startScan(onDevice: BluetoothScanListener, onError: BluetoothErrorListener): Promise<void>;
   stopScan(): Promise<void>;
   connectAndInspect(deviceId: string): Promise<readonly GattServiceSnapshot[]>;
-  monitorNotifiableCharacteristics(onPacket: RawPacketListener): Promise<number>;
+  monitorNotifiableCharacteristics(
+    onPacket: RawPacketListener,
+    onError: BluetoothErrorListener,
+  ): Promise<number>;
   disconnect(): Promise<void>;
   destroy(): Promise<void>;
 }

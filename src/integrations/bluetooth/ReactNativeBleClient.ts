@@ -114,7 +114,10 @@ export class ReactNativeBleClient implements BluetoothClient {
     return this.gattServices;
   }
 
-  async monitorNotifiableCharacteristics(onPacket: RawPacketListener): Promise<number> {
+  async monitorNotifiableCharacteristics(
+    onPacket: RawPacketListener,
+    onError: BluetoothErrorListener,
+  ): Promise<number> {
     if (!this.connectedDevice) {
       throw new Error('Connect to a Bluetooth device before monitoring notifications.');
     }
@@ -132,7 +135,11 @@ export class ReactNativeBleClient implements BluetoothClient {
           service.uuid,
           characteristic.uuid,
           (error, updatedCharacteristic) => {
-            if (error || !updatedCharacteristic?.value) {
+            if (error) {
+              onError(new Error(`${characteristic.uuid}: ${error.message}`));
+              return;
+            }
+            if (!updatedCharacteristic?.value) {
               return;
             }
 

@@ -158,13 +158,19 @@ export function BluetoothDiagnosticScreen() {
 
     try {
       metricsRef.current.reset();
-      const monitoredCount = await clientRef.current.monitorNotifiableCharacteristics((packet) => {
-        metricsRef.current.record(packet);
-        if (packetPreviewRef.current.length < 20) {
-          packetPreviewRef.current.push(packet);
-          console.info('[BLE packet]', JSON.stringify(packet));
-        }
-      });
+      const monitoredCount = await clientRef.current.monitorNotifiableCharacteristics(
+        (packet) => {
+          metricsRef.current.record(packet);
+          if (packetPreviewRef.current.length < 20) {
+            packetPreviewRef.current.push(packet);
+            console.info('[BLE packet]', JSON.stringify(packet));
+          }
+        },
+        (monitorError) => {
+          console.warn('[BLE monitor error]', monitorError.message);
+          setError(monitorError.message);
+        },
+      );
 
       metricsRef.current.setMonitoredCharacteristicCount(monitoredCount);
       setStatus(`Monitoring ${monitoredCount} notifiable characteristics`);
