@@ -16,7 +16,7 @@ Expo Go cannot load `react-native-ble-plx`; use a development build.
 On the Mac:
 
 1. Clone the repository and run `npm ci`.
-2. Choose a unique iOS bundle identifier and add it to `app.config.ts` under `ios.bundleIdentifier`.
+2. Copy `.env.example` to `.env` and set `IOS_BUNDLE_IDENTIFIER` to a unique iOS bundle identifier (for example `com.yourname.carassistant`). `app.config.ts` reads it into `ios.bundleIdentifier`.
 3. Connect the iPhone and run `npx expo run:ios --device`.
 4. Select the development team/signing identity in Xcode if prompted.
 5. Allow the Bluetooth permission on first launch.
