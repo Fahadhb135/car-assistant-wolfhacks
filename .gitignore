@@ -1,6 +1,36 @@
-node_modules
+node_modules/
+.expo/
+dist/
+web-build/
+
+# Generated native projects
+/android/
+/ios/
+
+# Native credentials and build output
+.kotlin/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Local environment and logs
 .env
-__pycache__
+.env*.local
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# Tooling and operating systems
+*.tsbuildinfo
+.DS_Store
+.metro-health-check*
+
+# Python (cloud/, databricks/)
+.venv/
+__pycache__/
 *.pyc
-.venv
+.pytest_cache/
 cloud/data/

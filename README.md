@@ -6,7 +6,7 @@ An AI driving coach built on the **STMicroelectronics SensorTile.box**. A dash-m
 
 Track: **Applied AI Hardware+**. Collect, analyze and act on real sensor data; detect patterns/anomalies; deploy ML to edge/IoT devices.
 
-> Status: design document only. No implementation yet.
+> Status: initial Expo mobile scaffold and BLE/GATT diagnostic are implemented; the STEVAL-MKBOXPRO v3.4.0 protocol profile is not yet decoded.
 
 ---
 
@@ -259,7 +259,7 @@ Driver ids are anonymous. Upload is opt-in, wifi-only by default, and queued wit
 
 ---
 
-## 10. Repository structure (planned)
+## 10. Mobile repository structure
 
 This repository contains one Expo React Native mobile application, so the Expo project lives at the repository root rather than under `apps/mobile/`. Expo Router owns the root `app/` directory; route files stay thin and delegate implementation to `src/`.
 
