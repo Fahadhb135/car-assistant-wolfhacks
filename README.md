@@ -406,3 +406,69 @@ Steps 1 to 6 are the product and must work with no cloud. Steps 7 to 9 add to it
 ## 14. Tech summary
 
 React Native (Expo dev build) · TypeScript · `react-native-ble-plx` · `onnxruntime-react-native` · SQLite · Python (FastAPI cloud service; NumPy and scikit-learn for training) · Databricks (Delta, notebooks, dashboards) · OpenStreetMap Overpass · ElevenLabs · Gemini Live API + Gemini API · STMicroelectronics SensorTile.box
+
+---
+
+## 15. Team split (3 people)
+
+Split by area, not by layer, so each person owns a vertical slice with minimal blocking on the others. Names are placeholders; swap in the real ones.
+
+| | **Person A: Hardware + App core** | **Person B: ML + Driving intelligence** | **Person C: Voice + Cloud + Data** |
+|---|---|---|---|
+| **Owns** | `app/` shell, `ble/`, `pipeline/`, crash detector, UI, replay source, `sync/` | `ml/`, `data/`, erratic-driving model, `detectors/erratic`, `location/` (Overpass tiles + stop-sign coach) | `voice/`, `cloud/`, `databricks/`, model distribution |
+| **Skills needed** | React Native, BLE, TypeScript | Python ML, signal processing, TS port, geospatial basics | Python/FastAPI, APIs, audio, Databricks |
+
+### Person A: Hardware + App core
+1. **Hour 0–2:** Expo dev build running on a real phone (do this first, it's the biggest schedule risk). Verify the SensorTile.box stream in the STBLE Sensor app and document the characteristic layout.
+2. BLE connect/reconnect and packet parser, producing `Sample` objects.
+3. Gravity calibration and vehicle-axis rotation, windowing (shared with B's feature code).
+4. Crash detector (thresholds) and the "Are you OK?" countdown flow.
+5. **Recording tool:** save raw sensor + GPS to files. This unblocks B's training data, so it ships early.
+6. Replay source that plays recorded drives through the same pipeline.
+7. App UI: connection status, live smoothness gauge, alert feed, notifications.
+8. `sync/`: local trip store, upload queue, model-update check and test-vector validation.
+
+### Person B: ML + Driving intelligence
+1. **Hour 0–2:** agree the `Sample`, `GpsFix` and `DriveEvent` types with A and C. Write the feature spec (window, features, units).
+2. Record normal drives and staged weaving laps using A's recording tool. Until it exists, use phone IMU or synthetic data to start.
+3. Feature extraction in Python, then the same in TypeScript, with **shared test vectors** so they match.
+4. Train the Isolation Forest baseline, evaluate on held-out drives, export to ONNX; fall back to a small TypeScript model if ONNX is a pain on the phone. Measure on-device inference time.
+5. Overpass client, 1-mile tile cache and prefetch, bearing/distance filtering.
+6. Stop-sign state machine (`approaching`, `ok`, `rolling`, `ran`) and the demo route data.
+7. Evaluation write-up: false alarms per hour, staged-weave precision/recall, what it does and does not claim.
+
+### Person C: Voice + Cloud + Data
+1. **Hour 0–2:** get ElevenLabs and Gemini keys working; generate and bundle the fixed alert phrases; stand up an empty FastAPI service with `/health` deployed somewhere reachable (laptop on hotspot is fine).
+2. `voice/` module in the app: priority queue, rate limiting, ElevenLabs playback, device-TTS fallback.
+3. Gemini Live in the app: connect, mic input, transcript, trip context. Decide direct token vs proxy after checking SDK support.
+4. Cloud service: `POST /trips`, Gemini post-trip report, `POST /live-token`, `GET /model/latest`.
+5. Databricks: Delta table schema, ingest from the service, trend and risky-location notebook, dashboard, retraining job that outputs a versioned ONNX model.
+6. Pre-load several demo trips and a pre-generated report as the offline fallback.
+
+### Shared and integration points
+
+| When | What | Who |
+|---|---|---|
+| Hour 0–2 | Agree the TypeScript types, event names and cloud JSON schema in `docs/contracts.md` | All |
+| After A's recorder ships | B starts real data collection | A → B |
+| After B's `DriveEvent`s work | C wires events to voice | B → C |
+| After A's `sync/` exists | C's `/trips` and `/model/latest` get real clients | A ↔ C |
+| Final stretch | Full-system integration, demo rehearsal, fallbacks | All |
+
+### Timeline (adapt to the real hackathon length)
+
+| Phase | A | B | C |
+|---|---|---|---|
+| **1. Foundations** | Dev build, BLE stream, recorder | Types, feature spec, synthetic data | Keys, bundled audio, empty cloud service |
+| **2. Core loop** | Pipeline, crash detector, replay, UI | Features, first model, tile cache | Voice module, event-to-speech |
+| **3. Intelligence** | Model loading on phone, `sync/` | Stop-sign coach, evaluation | Gemini Live, trip report endpoint |
+| **4. Cloud + data** | Upload and OTA in the app | Retraining data prep | Databricks pipeline and dashboard |
+| **5. Polish** | Demo UX, background behavior | Tune thresholds on real drives | Fallback assets, demo script |
+
+### Working agreements
+- Branch per person (`a/…`, `b/…`, `c/…`), small PRs into `main`, no force-pushes.
+- Mocks first: A provides a fake event source, C provides a mock cloud, so nobody waits for another person's work.
+- One person (suggest A) owns the demo device and final build; freeze features at a set time before judging.
+- Cut order if time runs short: Databricks retraining, then OTA model updates, then weekly summaries, then Gemini Live. The real-time path (A + B + the voice module) is never cut.
+- Rotate help toward whoever is blocked; A's BLE work is the most likely bottleneck.
+
