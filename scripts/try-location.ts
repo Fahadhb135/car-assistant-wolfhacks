@@ -12,25 +12,8 @@
 import { destination } from '../src/core/location/geo.ts';
 import { nextTileToPrefetch, tileBounds, tileKeyFor } from '../src/core/location/tiles.ts';
 import { OverpassClient } from '../src/integrations/location/overpassClient.ts';
-import { TileCache, type TileData, type TileStore } from '../src/integrations/location/tileCache.ts';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-
-const CACHE_DIR = new URL('../.cache/tiles/', import.meta.url);
-const fileFor = (key: string) => new URL(`${key.replace(':', '_')}.json`, CACHE_DIR);
-
-class FileTileStore implements TileStore {
-  async get(key: string): Promise<TileData | null> {
-    try {
-      return JSON.parse(await readFile(fileFor(key), 'utf8')) as TileData;
-    } catch {
-      return null;
-    }
-  }
-  async set(data: TileData): Promise<void> {
-    await mkdir(CACHE_DIR, { recursive: true });
-    await writeFile(fileFor(data.key), JSON.stringify(data));
-  }
-}
+import { TileCache } from '../src/integrations/location/tileCache.ts';
+import { FileTileStore } from './lib/fileTileStore.ts';
 
 const [lat, lon, heading, drive = 0] = process.argv.slice(2).map(Number);
 if ([lat, lon, heading].some((n) => !Number.isFinite(n))) {
