@@ -23,7 +23,7 @@ class TranscriptTurn(BaseModel):
 
 
 class Trip(BaseModel):
-    tripId: str = Field(min_length=1)
+    tripId: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
     driverId: str  # anonymous uuid
     start: int
     end: int

@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS trips (
   driver_id TEXT NOT NULL,
   payload TEXT NOT NULL,
   report TEXT,
-  received_at INTEGER NOT NULL
+  received_at INTEGER NOT NULL,
+  dbx_synced INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -21,6 +22,10 @@ class TripStore:
         os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.execute(SCHEMA)
+        try:  # databases created before Databricks support
+            self.conn.execute("ALTER TABLE trips ADD COLUMN dbx_synced INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         self.conn.commit()
 
     def insert_if_new(self, trip: Trip, now_ms: int) -> bool:
@@ -47,3 +52,11 @@ class TripStore:
     def all_trips(self) -> list[dict]:
         rows = self.conn.execute("SELECT payload FROM trips ORDER BY received_at").fetchall()
         return [json.loads(r[0]) for r in rows]
+
+    def mark_synced(self, trip_id: str) -> None:
+        self.conn.execute("UPDATE trips SET dbx_synced=1 WHERE trip_id=?", (trip_id,))
+        self.conn.commit()
+
+    def unsynced_ids(self) -> list[str]:
+        rows = self.conn.execute("SELECT trip_id FROM trips WHERE dbx_synced=0 ORDER BY received_at").fetchall()
+        return [r[0] for r in rows]

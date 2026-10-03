@@ -1,12 +1,14 @@
+import logging
 import os
 import time
 from pathlib import Path
 from typing import Callable, Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from .chat import ChatFn, ChatRequest, ChatResponse, answer, chat_from_env
+from .databricks_sink import DatabricksSink
 from .db import TripStore
 from .model_registry import PATTERN, latest_model
 from .reports import GeminiFn, gemini_from_env, make_report
@@ -44,6 +46,7 @@ def create_app(
     gemini: Optional[GeminiFn] = None,
     live_token: Optional[LiveTokenFn] = None,
     chat: Optional[ChatFn] = None,
+    sink: Optional[DatabricksSink] = None,
 ) -> FastAPI:
     app = FastAPI(title="Car Assistant cloud")
     store = TripStore(db_path or os.environ.get("TRIPS_DB", "cloud/data/trips.db"))
@@ -56,6 +59,25 @@ def create_app(
         chat = chat_from_env(key, os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"))
     if live_token is None and key:
         live_token = live_token_from_env(key)
+
+    if sink is None and os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN"):
+        sink = DatabricksSink(
+            os.environ["DATABRICKS_HOST"],
+            os.environ["DATABRICKS_TOKEN"],
+            os.environ.get("DATABRICKS_VOLUME_PATH", "/Volumes/main/carassistant/trips"),
+        )
+
+    def push_to_databricks(trip_id: str) -> bool:
+        trip = store.get_trip(trip_id)
+        if sink is None or trip is None:
+            return False
+        try:
+            sink.write_trip(trip)
+            store.mark_synced(trip_id)
+            return True
+        except Exception:
+            logging.getLogger("cloud").exception("databricks sync failed for %s", trip_id)
+            return False
 
     def build_report(trip_id: str) -> None:
         trip = store.get_trip(trip_id)
@@ -71,6 +93,7 @@ def create_app(
         created = store.insert_if_new(trip, int(time.time() * 1000))
         if created:
             background.add_task(build_report, trip.tripId)
+            background.add_task(push_to_databricks, trip.tripId)
         return {"tripId": trip.tripId, "created": created}
 
     @app.get("/trips/{trip_id}/report", response_model=Report)
@@ -83,6 +106,18 @@ def create_app(
             report = make_report(trip, gemini)
             store.save_report(trip_id, report)
         return report
+
+    @app.post("/admin/databricks/sync")
+    def sync_databricks(x_admin_token: Optional[str] = Header(default=None)) -> dict:
+        """Retry trips that failed to reach Databricks (e.g. venue wifi was down)."""
+        expected = os.environ.get("ADMIN_TOKEN")
+        if expected and x_admin_token != expected:
+            raise HTTPException(401, "bad admin token")
+        if sink is None:
+            raise HTTPException(503, "Databricks not configured")
+        ids = store.unsynced_ids()
+        done = sum(1 for i in ids if push_to_databricks(i))
+        return {"pending": len(ids), "synced": done}
 
     @app.post("/chat", response_model=ChatResponse)
     def post_chat(req: ChatRequest) -> ChatResponse:
