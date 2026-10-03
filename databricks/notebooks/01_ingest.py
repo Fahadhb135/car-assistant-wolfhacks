@@ -9,8 +9,8 @@ import json, os, sys
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), "..")))  # repo's databricks/ folder
 from lib.flatten import flatten_trip
 
-dbutils.widgets.text("catalog", "main")
-dbutils.widgets.text("schema", "carassistant")
+dbutils.widgets.text("catalog", "carassistant")
+dbutils.widgets.text("schema", "default")
 dbutils.widgets.text("volume", "trips")
 CAT, SCH, VOL = (dbutils.widgets.get(k) for k in ("catalog", "schema", "volume"))
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {CAT}.{SCH}")

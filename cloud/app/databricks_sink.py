@@ -4,6 +4,7 @@ being slow or down must never affect uploads: SQLite is the source of truth and 
 trips are retried."""
 import re
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -17,7 +18,8 @@ class DatabricksSink:
         host = host.strip()
         if not host.startswith(("http://", "https://")):
             host = "https://" + host
-        self.host = host.rstrip("/")
+        parsed = urlparse(host)  # keep scheme + host only: users paste URLs like .../explore/data?o=123
+        self.host = f"{parsed.scheme}://{parsed.netloc}"
         self.token = token
         self.volume_path = volume_path.rstrip("/")
         self.client = client or httpx.Client(timeout=15)

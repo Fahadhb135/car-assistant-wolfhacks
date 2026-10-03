@@ -2,8 +2,8 @@
 # Risky locations and per-driver trends for the dashboard. NOT run against a real workspace yet.
 
 # COMMAND ----------
-dbutils.widgets.text("catalog", "main")
-dbutils.widgets.text("schema", "carassistant")
+dbutils.widgets.text("catalog", "carassistant")
+dbutils.widgets.text("schema", "default")
 CAT, SCH = dbutils.widgets.get("catalog"), dbutils.widgets.get("schema")
 
 # COMMAND ----------

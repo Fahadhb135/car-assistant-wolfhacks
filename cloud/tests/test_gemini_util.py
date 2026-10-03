@@ -41,3 +41,7 @@ def test_exhausted_raises_last_error():
 def test_databricks_host_without_scheme_is_normalised():
     assert DatabricksSink("dbc-1.cloud.databricks.com/", "t", "/Volumes/x").host == "https://dbc-1.cloud.databricks.com"
     assert DatabricksSink("https://h.com", "t", "/Volumes/x").host == "https://h.com"
+
+
+def test_databricks_host_pasted_with_path_and_query_is_reduced_to_origin():
+    assert DatabricksSink("https://dbc-1.cloud.databricks.com/explore/data?o=123", "t", "/Volumes/x").host == "https://dbc-1.cloud.databricks.com"

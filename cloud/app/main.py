@@ -71,7 +71,7 @@ def create_app(
         sink = DatabricksSink(
             os.environ["DATABRICKS_HOST"],
             os.environ["DATABRICKS_TOKEN"],
-            os.environ.get("DATABRICKS_VOLUME_PATH", "/Volumes/main/carassistant/trips"),
+            os.environ.get("DATABRICKS_VOLUME_PATH", "/Volumes/carassistant/default/trips"),
         )
 
     def push_to_databricks(trip_id: str) -> bool:

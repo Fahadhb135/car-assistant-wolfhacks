@@ -14,8 +14,8 @@ import numpy as np
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), "..")))
 from lib.retrain import FEATURE_SCHEMA_VERSION, train_and_export
 
-dbutils.widgets.text("catalog", "main")
-dbutils.widgets.text("schema", "carassistant")
+dbutils.widgets.text("catalog", "carassistant")
+dbutils.widgets.text("schema", "default")
 CAT, SCH = dbutils.widgets.get("catalog"), dbutils.widgets.get("schema")
 
 # COMMAND ----------
@@ -25,6 +25,7 @@ X = np.array([r for r in rows if len(r) == width], dtype=np.float32)
 print(f"training on {len(X)} windows x {width} features (schema v{FEATURE_SCHEMA_VERSION}); dropped {len(rows) - len(X)}")
 
 # COMMAND ----------
+spark.sql(f"CREATE VOLUME IF NOT EXISTS {CAT}.{SCH}.models")
 out = Path(f"/Volumes/{CAT}/{SCH}/models")
 out.mkdir(parents=True, exist_ok=True)
 result = train_and_export(X, out)
