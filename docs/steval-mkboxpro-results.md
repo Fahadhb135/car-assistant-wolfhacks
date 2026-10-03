@@ -2,7 +2,7 @@
 
 Results from the BLE diagnostic in [bluetooth.md](bluetooth.md), captured on 2026-10-03 with an iPhone 16 Pro Max (iOS 26.6.1) running the Expo dev build.
 
-> Status: GATT layout captured. The board runs ST's **DATALOG2 (High Speed Datalog 2) v3.4** firmware. Subscribing alone produces no packets: DATALOG2 only streams once the sensors are enabled for BLE and a log is started with PnPL commands. The diagnostic's **Start IMU stream** button sends that sequence; its first run is pending.
+> Status: GATT layout captured. The board runs ST's **DATALOG2 (High Speed Datalog 2) v3.4** firmware. Subscribing alone produces no packets: DATALOG2 only streams once the sensors are enabled for BLE and a log is started with PnPL commands. The diagnostic's **Start IMU stream** button sends that sequence. **Run 2 confirmed live accelerometer and gyroscope data over BLE.**
 
 ## Firmware
 
@@ -34,13 +34,13 @@ The feature characteristics use the `…-0002-11e1-ac36-…` (BlueST extended fe
 
 | Characteristic | Service | Read | Write | Notify | Packets? | Changes with motion? |
 |---|---|---|---|---|---|---|
-| `00000001-000e-11e1-ac36-0002a5d5c51b` | `00000000-000e-11e1…` | yes | with response + without response | yes | none (first run) | no |
-| `00000002-000e-11e1-ac36-0002a5d5c51b` | `00000000-000e-11e1…` | yes | no | yes | none (first run) | no |
-| `00000014-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | without response | yes | none (first run) | no |
-| `0000001b-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | without response | yes | none (first run) | no |
-| `0000000f-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | yes | no | yes | none (first run) | no |
-| `00000011-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | without response | yes | none (first run) | no |
-| `00000023-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | no | yes | none (first run) | no |
+| `00000001-000e-11e1-ac36-0002a5d5c51b` | `00000000-000e-11e1…` | yes | with response + without response | yes | see run 2 | — |
+| `00000002-000e-11e1-ac36-0002a5d5c51b` | `00000000-000e-11e1…` | yes | no | yes | see run 2 | — |
+| `00000014-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | without response | yes | see run 2 | — |
+| `0000001b-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | without response | yes | see run 2 | — |
+| `0000000f-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | yes | no | yes | see run 2 | — |
+| `00000011-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | without response | yes | see run 2 | — |
+| `00000023-0002-11e1-ac36-0002a5d5c51b` | `00000000-0001-11e1…` | no | no | yes | see run 2 | — |
 
 ### Raw snapshot
 
@@ -128,7 +128,12 @@ The `[BLE GATT snapshot]` entry from Metro:
 
 **Run 1 (2026-10-03):** subscribed to all 7 notifiable characteristics with no errors and received **0 packets**, both still and moving. This is expected with DATALOG2, see *Streaming with DATALOG2* below.
 
-**Run 2 (Start IMU stream):** _pending_.
+**Run 2 (2026-10-03, Start IMU stream):** all 9 PnPL commands were accepted. Each response was `{"PnPL_Response":{"message":"","value":…,"status":true}}`, and `start_log` returned `"status":true`. The board then streamed on `0x23`:
+
+- **Packets:** 241 bytes each, 1 sensor-ID byte plus 40 samples × 6 bytes (int16 x, y, z, little-endian).
+- **Sensor `0x00` = accelerometer.** Decoded at 0.488 mg/LSB (±16 g), the mean magnitude was 1.29 g (0.36 to 4.08 g) while the board was moved.
+- **Sensor `0x01` = gyroscope.** Decoded at 35 mdps/LSB (±1000 dps), the mean magnitude was about 770 dps while the board was rotated.
+- **Scale factors** are the LSM6DSV16X datasheet sensitivities for the configured full scales. Confirm them against the firmware's `st_ble_stream.*.multiply_factor` before relying on absolute values.
 
 ## Streaming with DATALOG2
 
@@ -165,11 +170,16 @@ Commands sent by **Start IMU stream**, in order, written to `0x1b`:
 
 **Stream packets.** Each notification is 1 byte of sensor ID followed by whole samples, with no timestamp; derive time from the ODR. The firmware caps BLE bandwidth at 4000 B/s (`MAX_BLE_BANDWIDTH`) and downsamples above it. Accelerometer plus gyroscope at 120 Hz is about 1.4 kB/s.
 
-**Still open.** Sample scaling: read `st_ble_stream.*.multiply_factor` from the sensor status. Sensor ID values. Whether v3.4 on the board matches the current repo source.
+**Still open.** Confirm the scale factors from `st_ble_stream.*.multiply_factor`. Measure the sustained sample rate over a longer run.
 
 ## First packets
 
-None from the stream yet (run 2 pending).
+Run 2, first stream packets (hex, truncated):
+
+```text
+00000023  241 B  00 31 00 aa 02 5d f4 f9 ff 96 02 49 f2 …   sensor 0 (acc): (49, 682, -2979), (-7, 662, -3511), …
+00000023  241 B  01 b6 2f eb 48 15 e7 29 27 b3 3b 82 e9 …   sensor 1 (gyro)
+```
 
 ## Stream metrics
 
@@ -182,4 +192,4 @@ None from the stream yet (run 2 pending).
 
 ## Errors
 
-None shown during scanning, connection, service discovery or monitoring. Monitoring errors were not surfaced on the first run (see above).
+None in runs 1 and 2. Between them, connecting hung in service discovery. The iPhone Bluetooth log showed that the board sends a GATT **Service Changed** indication for `0x0001–0xffff` right after connecting. iOS then invalidated its cached services mid-discovery, and react-native-ble-plx never completed. The app now waits 1 s after connecting and retries discovery; afterwards, discovery completed in 716 ms.
