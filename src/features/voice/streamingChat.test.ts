@@ -207,14 +207,18 @@ function ptt(over: Partial<FakeRecognizer> = {}) {
   const asked: string[] = [];
   const states: PttState[] = [];
   let interrupts = 0;
+  let pendingCancels = 0;
   let resolveAsk: (() => void) | null = null;
   const machine = new PushToTalk({
     recognizer,
-    chat: { askStream: (t) => new Promise<void>((r) => { asked.push(t); resolveAsk = r; }) },
+    chat: {
+      askStream: (t) => new Promise<void>((r) => { asked.push(t); resolveAsk = r; }),
+      cancelPending: () => void pendingCancels++,
+    },
     voice: { interruptChat: () => void interrupts++ },
     onState: (s) => states.push(s),
   });
-  return { machine, recognizer, asked, states, interrupts: () => interrupts, finishAsk: () => resolveAsk?.() };
+  return { machine, recognizer, asked, states, interrupts: () => interrupts, pendingCancels: () => pendingCancels, finishAsk: () => resolveAsk?.() };
 }
 
 describe('PushToTalk', () => {
@@ -282,5 +286,73 @@ describe('PushToTalk', () => {
     finishFirst();
     await first;
     expect(p.machine.state).toBe('listening'); // not clobbered back to idle
+  });
+});
+
+
+describe('review fixes: nothing from an old question is spoken later', () => {
+  it('pressing talk, a safety-alert cancel and a new tap all drop the question still loading', async () => {
+    const p = ptt();
+    void p.machine.askQuick('How was that?');
+    await flush();
+    const before = p.pendingCancels();
+    await p.machine.pressIn();
+    expect(p.pendingCancels()).toBe(before + 1);
+    p.machine.cancel();
+    expect(p.pendingCancels()).toBe(before + 2);
+    void p.machine.askQuick('What should I work on?');
+    expect(p.pendingCancels()).toBe(before + 3);
+  });
+
+  it('CoachChat: a question cancelled while waiting for its first sentence says nothing at all', async () => {
+    const speakReply = vi.fn();
+    const speakReplyStream = vi.fn();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow = (async (_u: string, init: RequestInit) => {
+      await gate;
+      if ((init.signal as AbortSignal).aborted) throw new Error('aborted');
+      return new Response(new ReadableStream({ start(c) { c.enqueue(ndjson([{ type: 'sentence', i: 0, text: 'Too late now.', audio: null, ms: 1 }])); c.close(); } }));
+    }) as unknown as typeof fetch;
+    const chat = new CoachChat({ baseUrl: 'http://x', voice: { speakReply, speakReplyStream }, streamFetchImpl: slow });
+    const asking = chat.askStream('how was that?');
+    await flush();
+    chat.cancelPending();
+    release();
+    await asking;
+    expect(speakReplyStream).not.toHaveBeenCalled();
+    expect(speakReply).not.toHaveBeenCalled(); // no apology either: the driver moved on
+  });
+
+  it('CoachChat: a newer question replaces an older one that has not answered yet', async () => {
+    const speakReplyStream = vi.fn();
+    const gates: (() => void)[] = [];
+    const fetchImpl = (async (_u: string, init: RequestInit) => {
+      await new Promise<void>((r) => gates.push(r));
+      if ((init.signal as AbortSignal).aborted) throw new Error('aborted');
+      return new Response(new ReadableStream({ start(c) { c.enqueue(ndjson([{ type: 'sentence', i: 0, text: 'An answer here.', audio: null, ms: 1 }])); c.close(); } }));
+    }) as unknown as typeof fetch;
+    const chat = new CoachChat({ baseUrl: 'http://x', voice: { speakReply: vi.fn(), speakReplyStream }, streamFetchImpl: fetchImpl });
+    const first = chat.askStream('first');
+    await flush();
+    const second = chat.askStream('second');
+    await flush();
+    gates.forEach((g) => g());
+    await Promise.all([first, second]);
+    expect(speakReplyStream).toHaveBeenCalledTimes(1); // only the newer question is answered
+  });
+
+  it('AlertQueue: dropping or expiring a queued streamed reply cancels its download', async () => {
+    const { AlertQueue } = await import('./AlertQueue');
+    const { chatReplyStreamAlert } = await import('./phrases');
+    const q = new AlertQueue();
+    const a = streamOf([seg('one')]);
+    const b = streamOf([seg('two')]);
+    q.enqueue(chatReplyStreamAlert('a', a.stream, 0), 0);
+    q.removeKind('chat_reply');
+    expect(a.state.cancelled).toBe(1);
+    q.enqueue(chatReplyStreamAlert('b', b.stream, 0), 0);
+    q.next(60_000, { allowTips: true }); // long past its 15 s TTL
+    expect(b.state.cancelled).toBe(1);
   });
 });

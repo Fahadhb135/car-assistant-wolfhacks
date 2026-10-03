@@ -20,6 +20,20 @@ export const expoAudioBackend: AudioBackend = {
           if (status.didJustFinish) cb();
         });
       },
+      onError: (cb) => {
+        player.addListener('playbackStatusUpdate', (status) => {
+          if (status.error) cb(status.error);
+        });
+      },
+      onLoaded: (cb) => {
+        let reported = false;
+        player.addListener('playbackStatusUpdate', (status) => {
+          if (!reported && status.isLoaded && status.duration > 0) {
+            reported = true;
+            cb(status.duration);
+          }
+        });
+      },
       release: () => player.remove(),
     };
   },

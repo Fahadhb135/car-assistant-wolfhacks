@@ -8,6 +8,7 @@ GEMINI_API_KEY=... .venv/bin/uvicorn app.main:app_factory --factory --host 0.0.0
 .venv/bin/python -m pytest
 ```
 
+- Admin endpoints (`/admin/*`) need `X-Admin-Token: $ADMIN_TOKEN`; with no `ADMIN_TOKEN` set they only answer requests from this machine.
 - Without `GEMINI_API_KEY`, reports use the deterministic template and chat answers with a fallback line.
 - Publish a retrained model by copying `model-vN.onnx` into `cloud/models/` (human-gated).
 

@@ -13,6 +13,8 @@ export type StreamReplyOptions = {
   signal?: AbortSignal;
   /** Give up if the first packet takes longer than this. */
   firstPacketTimeoutMs?: number;
+  /** After that, give up if the connection goes quiet for this long (e.g. the car lost signal). */
+  stallTimeoutMs?: number;
 };
 
 const NEWLINE = 0x0a;
@@ -54,14 +56,22 @@ export async function* streamReply(o: StreamReplyOptions): AsyncGenerator<ReplyP
   const relay = () => ctrl.abort();
   o.signal?.addEventListener('abort', relay, { once: true });
   if (o.signal?.aborted) ctrl.abort();
-  let timer: ReturnType<typeof setTimeout> | null = setTimeout(() => ctrl.abort(), o.firstPacketTimeoutMs ?? 8000);
+  // The deadline only runs while we wait on the network, never while the consumer is busy
+  // speaking a sentence (the generator is paused at `yield` then), so long sentences are safe.
+  let timer: ReturnType<typeof setTimeout> | null = null;
   const clear = () => {
     if (timer) clearTimeout(timer);
     timer = null;
   };
+  const arm = (ms: number) => {
+    clear();
+    timer = setTimeout(() => ctrl.abort(), ms);
+  };
+  let gotPacket = false;
 
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   try {
+    arm(o.firstPacketTimeoutMs ?? 8000);
     const res = await (o.fetchImpl ?? fetch)(`${o.baseUrl}/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -73,7 +83,9 @@ export async function* streamReply(o: StreamReplyOptions): AsyncGenerator<ReplyP
 
     let buf = new Uint8Array(0);
     for (;;) {
+      arm(gotPacket ? (o.stallTimeoutMs ?? 6000) : (o.firstPacketTimeoutMs ?? 8000));
       const { done, value } = await reader.read();
+      clear();
       if (value && value.length) {
         const merged = new Uint8Array(buf.length + value.length);
         merged.set(buf);
@@ -86,7 +98,7 @@ export async function* streamReply(o: StreamReplyOptions): AsyncGenerator<ReplyP
         const packet = parsePacket(decodeUtf8(buf.subarray(0, nl)));
         buf = buf.subarray(nl + 1);
         if (packet) {
-          clear();
+          gotPacket = true;
           yield packet;
           if (packet.type === 'done') return;
         }

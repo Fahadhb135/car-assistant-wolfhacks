@@ -12,7 +12,7 @@ export type PttState = 'idle' | 'listening' | 'thinking' | 'error';
 
 export type PushToTalkDeps = {
   recognizer: SpeechRecognizer;
-  chat: { askStream(message: string): Promise<void> };
+  chat: { askStream(message: string): Promise<void>; cancelPending(): void };
   voice: { interruptChat(): void };
   onState?: (state: PttState) => void;
 };
@@ -39,7 +39,7 @@ export class PushToTalk {
   async pressIn(): Promise<void> {
     if (!this.deps.recognizer.available || this._state === 'listening') return;
     const turn = ++this.turn;
-    this.deps.voice.interruptChat();
+    this.silenceChat();
     this.set('listening');
     try {
       await this.deps.recognizer.start();
@@ -66,7 +66,7 @@ export class PushToTalk {
   /** Tap a quick-question chip: no microphone needed. */
   async askQuick(text: string): Promise<void> {
     const turn = ++this.turn;
-    this.deps.voice.interruptChat();
+    this.silenceChat();
     await this.ask(text, turn);
   }
 
@@ -74,7 +74,14 @@ export class PushToTalk {
   cancel(): void {
     this.turn++;
     if (this._state === 'listening') this.deps.recognizer.cancel();
+    this.deps.chat.cancelPending(); // an answer still on its way must not be spoken afterwards
     this.set('idle');
+  }
+
+  /** Nothing from an earlier question may play: not the reply speaking now, not one still loading. */
+  private silenceChat(): void {
+    this.deps.chat.cancelPending();
+    this.deps.voice.interruptChat();
   }
 
   private async ask(text: string, turn: number): Promise<void> {

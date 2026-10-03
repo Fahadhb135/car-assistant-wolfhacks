@@ -23,6 +23,14 @@ export type CoachChatDeps = {
  */
 export class CoachChat {
   private n = 0;
+  /** The streamed question still waiting for its first sentence, if any. */
+  private pending: AbortController | null = null;
+
+  /** Drop a question that has not started speaking yet (the driver pressed talk, a safety alert, ...). */
+  cancelPending(): void {
+    this.pending?.abort();
+    this.pending = null;
+  }
   constructor(private deps: CoachChatDeps) {}
 
   async ask(message: string): Promise<string> {
@@ -66,7 +74,9 @@ export class CoachChat {
       speedKmh: ctx.speedKmh,
       elapsedMin: ctx.elapsedMin,
     };
+    this.cancelPending(); // a newer question replaces an unanswered older one
     const ctrl = new AbortController();
+    this.pending = ctrl;
     const id = `chat-${++this.n}`;
     const packets = streamReply({
       baseUrl,
@@ -83,6 +93,11 @@ export class CoachChat {
       } while (!first.done && first.value.type !== 'sentence');
     } catch {
       first = null;
+    }
+    if (this.pending === ctrl) this.pending = null;
+    if (ctrl.signal.aborted) {
+      void packets.return(undefined); // cancelled while waiting: say nothing, not even the apology
+      return;
     }
     if (!first || first.done || first.value.type !== 'sentence') {
       ctrl.abort();

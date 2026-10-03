@@ -22,10 +22,12 @@ async function replay() {
   });
   const session = createReplaySession(voice, (e) => events.push(e));
   const speed = DEMO_ROUTE.speedMph * 0.44704;
-  for (const fix of replayFixes(DEMO_ROUTE)) {
+  const fixes = replayFixes(DEMO_ROUTE);
+  await session.prime(fixes[0]!);
+  for (const fix of fixes) {
     now = fix.t;
     meters = Math.round((fix.t / 1000) * speed);
-    await session.onFix(fix);
+    session.onFix(fix);
     await Promise.resolve();
     await Promise.resolve(); // let the voice queue run
   }
@@ -83,8 +85,35 @@ describe('DriveSession', () => {
       hotspots: null,
       voice: { handleEvent: (e) => void events.push(e) },
     });
-    expect(await session.onFix({ lat: 1, lon: 1, heading: 0, speed: 5, t: 0 })).toEqual([]);
+    expect(session.onFix({ lat: 1, lon: 1, heading: 0, speed: 5, t: 0 })).toEqual([]);
     expect(events).toEqual([]);
+  });
+
+  it('never waits on the network: a slow tile load does not delay or reorder events', () => {
+    const order: number[] = [];
+    let loads = 0;
+    const session = new DriveSession({
+      coach: { update: (fix) => (order.push(fix.t), []) },
+      tiles: { update: () => (loads++, new Promise<void>(() => {})), featuresAhead: () => [], roadsNear: () => [] }, // Overpass hangs
+      voice: { handleEvent() {} },
+    });
+    for (let t = 0; t < 3; t++) session.onFix({ lat: 1, lon: 1, heading: 0, speed: 5, t });
+    expect(order).toEqual([0, 1, 2]); // processed immediately, in order, despite the hung fetch
+    expect(loads).toBe(3);
+  });
+
+  it('reports tile failures without stopping the drive', async () => {
+    const errors: unknown[] = [];
+    const session = new DriveSession({
+      coach: { update: () => [] },
+      tiles: { update: () => Promise.reject(new Error('overpass down')), featuresAhead: () => [], roadsNear: () => [] },
+      voice: { handleEvent() {} },
+      onError: (e) => errors.push(e),
+    });
+    session.onFix({ lat: 1, lon: 1, heading: 0, speed: 5, t: 0 });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(errors).toHaveLength(1);
   });
 });
 
