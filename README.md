@@ -259,20 +259,90 @@ Driver ids are anonymous. Upload is opt-in, wifi-only by default, and queued wit
 
 ---
 
-## 10. Repo layout (planned)
+## 10. Repository structure (planned)
 
-```
+This repository contains one Expo React Native mobile application, so the Expo project lives at the repository root rather than under `apps/mobile/`. Expo Router owns the root `app/` directory; route files stay thin and delegate implementation to `src/`.
+
+```text
 car-assistant-wolfhacks/
-├── app/               # React Native (Expo dev build) app: the whole real-time path
-│   └── src/
-│       ├── ble/  pipeline/  detectors/  location/  voice/  events/  storage/  sync/  ui/
-├── cloud/             # Python FastAPI service: trip ingest, Gemini analysis, token minting, model serving
-├── databricks/        # notebooks and jobs: Delta table schemas, trend analysis, retraining, ONNX export
-├── ml/                # Python: shared feature code, first-model training, evaluation, test vectors
-├── data/              # recorded drives (sensor + GPS) for training and replay
-├── assets/audio/      # pre-generated alert phrases
-└── docs/
+├── app/                         # Expo Router routes only
+│   ├── _layout.tsx
+│   ├── index.tsx                # Landing and device connection
+│   ├── drive.tsx                # Active driving screen
+│   ├── settings.tsx
+│   └── trips/
+│       └── [id].tsx             # Trip report
+│
+├── src/
+│   ├── core/                    # Pure TypeScript; no React Native APIs
+│   │   ├── sensors/
+│   │   │   ├── types.ts
+│   │   │   ├── SensorSource.ts
+│   │   │   ├── calibration.ts
+│   │   │   ├── windowing.ts
+│   │   │   └── features.ts
+│   │   ├── detection/
+│   │   │   ├── crashDetector.ts
+│   │   │   └── erraticDrivingDetector.ts
+│   │   └── events/
+│   │       ├── types.ts
+│   │       └── priority.ts
+│   │
+│   ├── integrations/            # Native devices and external services
+│   │   ├── bluetooth/
+│   │   │   ├── BleSensorSource.ts
+│   │   │   ├── packetDecoder.ts
+│   │   │   ├── permissions.ts
+│   │   │   └── uuids.ts
+│   │   ├── location/
+│   │   ├── audio/
+│   │   ├── storage/
+│   │   └── backend/             # Client for a remote backend; not server code
+│   │
+│   ├── features/                # User-facing mobile features
+│   │   ├── device-setup/
+│   │   ├── driving-session/
+│   │   ├── alert-feed/
+│   │   └── trip-summary/
+│   │
+│   ├── replay/
+│   │   ├── ReplaySensorSource.ts
+│   │   └── replayController.ts
+│   ├── components/              # Shared visual components
+│   ├── hooks/                   # Shared React hooks
+│   ├── state/                   # Global and driving-session state
+│   └── config/                  # Public runtime configuration
+│
+├── assets/
+│   ├── images/
+│   ├── icons/
+│   └── audio/                   # Bundled alert phrases
+├── fixtures/
+│   └── drives/                  # Small sanitized replay recordings
+├── docs/
+│   ├── bluetooth.md
+│   ├── event-schema.md
+│   └── demo.md
+├── scripts/                     # Development and data-conversion utilities
+├── app.config.ts
+├── eas.json
+├── expo-env.d.ts
+├── package.json
+├── tsconfig.json
+├── eslint.config.js
+├── .env.example
+└── README.md
 ```
+
+Boundary rules:
+
+- `app/` and `src/` are both part of the mobile application; neither is a secure backend.
+- `app/` contains navigation entry points only. Business logic belongs in `src/`.
+- `src/core/` remains platform-independent so detection logic can be unit-tested and reused by live BLE and replay inputs.
+- `src/integrations/` owns React Native, Expo, Bluetooth, storage, network and other platform APIs.
+- Both `BleSensorSource` and `ReplaySensorSource` implement the same `SensorSource` contract so downstream processing is identical.
+- Secrets such as Gemini, ElevenLabs and Databricks credentials must never be stored in `app/`, `src/` or `EXPO_PUBLIC_*` variables.
+- Python cloud, ML-training and Databricks code will be added only when that work begins, either as explicit top-level services or in separate repositories.
 
 ---
 
