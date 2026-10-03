@@ -6,7 +6,7 @@ An AI driving coach built on the **STMicroelectronics SensorTile.box**. A dash-m
 
 Track: **Applied AI Hardware+**. Collect, analyze and act on real sensor data; detect patterns/anomalies; deploy ML to edge/IoT devices.
 
-> Status: the Expo mobile scaffold, BLE/GATT diagnostic, and a mock-data UI flow for home, active drive, replay, and trip summary are implemented. The driving screens are ready to be connected to live session state; the STEVAL-MKBOXPRO v3.4.0 protocol profile is not yet decoded. The location layer (Overpass tiles, stop-sign / traffic-light announcements, highway entry/exit coaching) is implemented as tested TypeScript modules in `src/core/location/` and `src/integrations/location/`, not yet wired into the app UI or voice.
+> Status: the Expo mobile scaffold, BLE/GATT diagnostic, a mock-data UI flow for home, active drive, replay, and trip summary, and a pure-TypeScript heuristic IMU pipeline are implemented. The IMU pipeline emits experimental crash and swerve candidate events from replay data; its thresholds are not validated safety thresholds (see [the IMU pipeline guide](docs/imu-pipeline.md)). The STEVAL-MKBOXPRO v3.4.0 protocol profile is not yet decoded. The location layer (Overpass tiles, stop-sign / traffic-light announcements, highway entry/exit coaching) is implemented as tested TypeScript modules in `src/core/location/` and `src/integrations/location/`. The voice layer (alert queue, bundled ElevenLabs audio, streamed coach chat), crowd hotspots, the cloud service and the Databricks pipeline are implemented in `src/features/voice/`, `src/core/coaching/`, `cloud/` and `databricks/`; the drive screen's replay mode runs the real coaching and voice code offline on a bundled route.
 
 ---
 
@@ -93,8 +93,8 @@ Notes:
 
 1. **Sensor to phone.** The SensorTile.box streams IMU packets over BLE. The app parses ST's characteristic format into `{t, ax, ay, az, gx, gy, gz}`.
 2. **Calibrate.** At the start of a trip, estimate the gravity vector and rotate samples into vehicle axes (forward / lateral / vertical).
-3. **Crash check.** Every sample goes through the threshold crash detector (see 6.1). A hit fires an immediate local alert.
-4. **Window and infer.** Samples are windowed (about 2 s, 50% overlap), turned into features, and scored by the on-device erratic-driving model. High scores emit `erratic_driving` events.
+3. **Crash check.** Every sample goes through the threshold crash detector (see 6.1). The IMU pipeline (`src/core/imu/`) currently emits an experimental `crash_candidate`; `src/core/events/fromImu.ts` maps it to a `crash` event so the voice layer can alert. Real-data tuning is follow-up work.
+4. **Window and infer.** The current implementation uses timestamp windows and a deterministic swerve heuristic to emit `swerve_candidate`, which the same adapter maps to `erratic_driving`. The planned on-device erratic-driving model can later consume the same features after real drives are collected and evaluated.
 5. **Location coach.** GPS plus heading are matched against cached map data (see Section 7). Emits `stop_sign_ahead`, `traffic_light_ahead`, `highway_entering` and `highway_exiting` events (implemented), and stop-compliance events `stop_ok` / `rolling_stop` / `ran_stop` (planned).
 6. **Speak.** Events go to a priority queue, then ElevenLabs (cached audio for fixed phrases), plus a local notification and on-screen banner.
 7. **Talk back.** The driver can speak to the assistant through Gemini Live ("how was that turn?"). The phone fetches a short-lived token from the cloud service and connects directly. Trip context is passed in so answers are specific. Transcripts are stored with the trip.
@@ -171,7 +171,7 @@ Live detection, alerts and the stop-sign coach need no network. The network is u
 - A short confirmation window cuts false positives (potholes, dropped sensor) before escalating to the "Are you OK?" flow. The 4 g figure is an assumption to tune on real data.
 
 ### 6.2 Swerve / erratic driving (edge model)
-We have no labeled "drunk" data and cannot ethically collect it. So we **do not claim intoxication detection**. We detect **impaired / erratic driving patterns**.
+We have no labeled "drunk" data and cannot ethically collect it. So we **do not claim intoxication detection**. The current code emits experimental `swerve_candidate` events from configurable heuristics; the model described below is a later phase after real-data collection and evaluation.
 
 - **Features per window:** lateral accel stats, yaw-rate variance, zero-crossing rate of yaw (weaving frequency), jerk, longitudinal accel spikes, dominant frequency of lateral motion.
 - **Model:** unsupervised anomaly detection (Isolation Forest baseline; optional small autoencoder). The first version is trained **offline in Python** on normal driving we record ourselves. Later versions are retrained in Databricks on pooled opted-in drives and delivered over the air.
@@ -263,6 +263,9 @@ type DriveEvent =
       speedMps: number; targetSpeedMps: number; targetIsDefault: boolean;
       advice: 'speed_up' | 'slow_down' | 'ok'; road?: string }
   | { kind: 'stop_ok' | 'rolling_stop' | 'ran_stop'; severity: 'info' | 'warn' };
+
+// The IMU pipeline (src/core/imu) emits its own `ImuEvent` candidates (crash_candidate, swerve_candidate)
+// with confidence and evidence; src/core/events/fromImu.ts maps them into this union.
 ```
 
 `GpsFix` and the location events are implemented in `src/core/location/types.ts` and `src/core/location/events.ts` (`LocationEvent`). They move into `src/core/events/types.ts` when that shared module is created. `featureId` is the OSM node id. `road` is the highway's `ref` or `name` (e.g. "I 440"). Speeds are m/s, and the voice layer converts them for speech.

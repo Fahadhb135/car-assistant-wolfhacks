@@ -11,7 +11,7 @@
     "web": "expo start --web",
     "test": "npm run test:node && npm run test:vitest",
     "typecheck": "tsc --noEmit",
-    "test:node": "tsx --test 'src/core/location/**/*.test.ts' 'src/integrations/location/**/*.test.ts' 'src/integrations/bluetooth/**/*.test.ts'",
+    "test:node": "tsx --test 'src/core/location/**/*.test.ts' 'src/core/imu/**/*.test.ts' 'src/replay/**/*.test.ts' 'src/integrations/location/**/*.test.ts' 'src/integrations/bluetooth/**/*.test.ts'",
     "test:vitest": "vitest run",
     "phrases": "tsx scripts/generate-phrases.mts"
   },
@@ -38,8 +38,7 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-web": "~0.21.0",
-    "react-native-worklets": "0.10.1",
-    "undefined": "/Users/farhadbhatti/.claude/jobs/62ba4244/tmp/npm-cache"
+    "react-native-worklets": "0.10.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

@@ -52,3 +52,16 @@ export function createIdGenerator(prefix = 'e'): () => string {
 export function toDriveEvent(input: DriveEventInput, nextId: () => string): DriveEvent {
   return { ...input, eventId: nextId() } as DriveEvent;
 }
+
+/**
+ * Raw candidate events from the heuristic IMU pipeline (src/core/imu). They carry a confidence and the
+ * numbers behind it, and use the monotonic sample clock. `fromImu.ts` turns them into `DriveEvent`s
+ * for the rest of the app (voice, trip record).
+ */
+export type ImuEvent = Readonly<{
+  kind: 'crash_candidate' | 'swerve_candidate';
+  occurredAtMs: number;
+  severity: 'warning' | 'critical';
+  confidence: number;
+  evidence: Readonly<Record<string, number>>;
+}>;
