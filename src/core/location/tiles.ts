@@ -1,4 +1,4 @@
-import { destination, EARTH_RADIUS_M, METERS_PER_MILE, type LatLon } from './geo.ts';
+import { destination, EARTH_RADIUS_M, METERS_PER_MILE, type LatLon } from './geo';
 
 // Map data is fetched in ~1-mile square tiles (README section 7) so we query
 // Overpass once per tile instead of once per GPS fix.

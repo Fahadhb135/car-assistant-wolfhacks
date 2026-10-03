@@ -1,21 +1,24 @@
-import type { LatLon } from '../../core/location/geo.ts';
-import type { StopSign } from '../../core/location/overpass.ts';
-import { signsAhead, type SignAhead, type SignFilterOptions } from '../../core/location/signFilter.ts';
-import { tileBounds, tilesForFix, type TileKey } from '../../core/location/tiles.ts';
-import type { OverpassClient } from './overpassClient.ts';
+import { featuresAhead, type FeatureAhead, type FeatureFilterOptions } from '../../core/location/featureFilter';
+import type { LatLon } from '../../core/location/geo';
+import { tileBounds, tilesForFix, type TileKey } from '../../core/location/tiles';
+import type { RoadWay, TileContents } from '../../core/location/types';
+import type { OverpassClient } from './overpassClient';
 
-// Stop-sign data per ~1-mile tile, layered: memory → persistent store → Overpass
+// Map data per ~1-mile tile, layered: memory → persistent store → Overpass
 // → (on failure) a stale stored copy → bundled demo-route data.
 //
 // The live path never waits on the network: call `update(fix)` on every GPS fix
-// to start any fetches it needs (fire and forget), and `signsAhead(fix)` to read
-// whatever is already loaded. A tile that fails to load is retried after a
-// back-off instead of on every fix.
+// to start any fetches it needs (fire and forget), and read `featuresAhead(fix)`
+// and `roadsNear(fix)` for whatever is already loaded. A tile that fails to
+// load is retried after a back-off instead of on every fix.
 
-export type TileData = {
+/** Bump when TileContents changes shape so stored tiles from older builds are refetched. */
+export const TILE_SCHEMA = 2;
+
+export type TileData = TileContents & {
   key: TileKey;
+  schema: number;
   fetchedAt: number;
-  signs: StopSign[];
   source: 'network' | 'bundled';
 };
 
@@ -36,10 +39,10 @@ export class MemoryTileStore implements TileStore {
 }
 
 export type TileCacheOptions = {
-  client: Pick<OverpassClient, 'fetchStopSigns'>;
+  client: Pick<OverpassClient, 'fetchTile'>;
   store?: TileStore;
   /** Pre-fetched tiles for the demo route, used when the network is unavailable. */
-  bundled?: Record<TileKey, StopSign[]>;
+  bundled?: Record<TileKey, TileContents>;
   /** Stored tiles older than this are refetched (but still used if the fetch fails). */
   maxAgeMs?: number;
   /** Wait this long after a failed fetch before trying that tile again. */
@@ -56,7 +59,7 @@ export class TileCache {
   private readonly failedAt = new Map<TileKey, number>();
   private readonly client: TileCacheOptions['client'];
   private readonly store: TileStore;
-  private readonly bundled: Record<TileKey, StopSign[]>;
+  private readonly bundled: Record<TileKey, TileContents>;
   private readonly maxAgeMs: number;
   private readonly retryAfterMs: number;
   private readonly now: () => number;
@@ -77,12 +80,16 @@ export class TileCache {
     await Promise.all(tilesForFix(fix).map((key) => this.getTile(key)));
   }
 
-  /** Signs ahead of the car among the tiles already loaded. Never blocks. */
-  signsAhead(fix: LatLon & { heading?: number | null }, opts?: SignFilterOptions): SignAhead[] {
-    const signs = tilesForFix(fix, opts?.maxDistanceM, opts?.maxBearingDeltaDeg).flatMap(
-      (key) => this.memory.get(key)?.signs ?? [],
-    );
-    return signsAhead(fix, signs, opts);
+  /** Stop signs and traffic lights ahead of the car among loaded tiles. Never blocks. */
+  featuresAhead(fix: LatLon & { heading?: number | null }, opts?: FeatureFilterOptions): FeatureAhead[] {
+    const features = this.loaded(fix, opts).flatMap((t) => t.features);
+    return featuresAhead(fix, dedupeById(features), opts);
+  }
+
+  /** Highway and ramp ways in the loaded tiles around the car. Never blocks. */
+  roadsNear(fix: LatLon & { heading?: number | null }): RoadWay[] {
+    // A way crossing a tile border comes back in both tiles' queries.
+    return dedupeById(this.loaded(fix).flatMap((t) => t.roads));
   }
 
   /** Synchronous peek at a loaded tile. */
@@ -108,12 +115,19 @@ export class TileCache {
     return p;
   }
 
+  private loaded(fix: LatLon & { heading?: number | null }, opts?: FeatureFilterOptions): TileData[] {
+    return tilesForFix(fix, opts?.maxDistanceM, opts?.maxBearingDeltaDeg)
+      .map((key) => this.memory.get(key))
+      .filter((t): t is TileData => t !== undefined);
+  }
+
   private isFresh(t: TileData): boolean {
     return t.source === 'network' && this.now() - t.fetchedAt < this.maxAgeMs;
   }
 
   private async load(key: TileKey): Promise<TileData | null> {
-    const stored = await this.store.get(key).catch(() => null);
+    const raw = await this.store.get(key).catch(() => null);
+    const stored = raw && raw.schema === TILE_SCHEMA ? raw : null;
     if (stored && this.isFresh(stored)) {
       this.memory.set(key, stored);
       return stored;
@@ -123,8 +137,8 @@ export class TileCache {
     const inBackoff = failed !== undefined && this.now() - failed < this.retryAfterMs;
     if (!inBackoff) {
       try {
-        const signs = await this.client.fetchStopSigns(tileBounds(key));
-        const data: TileData = { key, fetchedAt: this.now(), signs, source: 'network' };
+        const contents = await this.client.fetchTile(tileBounds(key));
+        const data: TileData = { key, schema: TILE_SCHEMA, fetchedAt: this.now(), source: 'network', ...contents };
         this.failedAt.delete(key);
         this.memory.set(key, data);
         await this.store.set(data).catch((err) => this.onError?.(key, err));
@@ -136,10 +150,16 @@ export class TileCache {
     }
 
     // Offline or Overpass down: a stale copy beats bundled data beats nothing.
-    const fallback =
-      stored ??
-      (this.bundled[key] ? { key, fetchedAt: 0, signs: this.bundled[key], source: 'bundled' as const } : null);
+    const bundled = this.bundled[key];
+    const fallback: TileData | null =
+      stored ?? (bundled ? { key, schema: TILE_SCHEMA, fetchedAt: 0, source: 'bundled', ...bundled } : null);
     if (fallback) this.memory.set(key, fallback);
     return fallback;
   }
+}
+
+function dedupeById<T extends { id: number }>(items: T[]): T[] {
+  const seen = new Map<number, T>();
+  for (const item of items) seen.set(item.id, item);
+  return [...seen.values()];
 }

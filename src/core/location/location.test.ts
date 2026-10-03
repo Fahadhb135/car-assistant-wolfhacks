@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { bearingDeg, bearingDelta, destination, distanceM, METERS_PER_MILE } from './geo.ts';
-import { buildStopSignQuery, parseDirectionTag, parseStopSigns, type StopSign } from './overpass.ts';
-import { signsAhead } from './signFilter.ts';
-import { nextTileToPrefetch, tileBounds, tileKeyFor, tilesForFix } from './tiles.ts';
+import { featuresAhead } from './featureFilter';
+import { bearingDeg, bearingDelta, destination, distanceM, METERS_PER_MILE } from './geo';
+import { buildTileQuery, parseDirectionTag, parseMaxspeed, parseTile } from './overpass';
+import { nextTileToPrefetch, tileBounds, tileKeyFor, tilesForFix } from './tiles';
+import type { RoadFeature } from './types';
 
 const RALEIGH = { lat: 35.7796, lon: -78.6382 };
 const near = (a: number, b: number, tol: number) => assert.ok(Math.abs(a - b) <= tol, `${a} not within ${tol} of ${b}`);
@@ -79,10 +80,13 @@ describe('tiles', () => {
 });
 
 describe('overpass parsing', () => {
-  it('builds a bbox query in south,west,north,east order', () => {
-    const q = buildStopSignQuery({ south: 1, west: 2, north: 3, east: 4 });
-    assert.match(q, /\[out:json\]/);
-    assert.match(q, /node\["highway"="stop"\]\(1\.000000,2\.000000,3\.000000,4\.000000\)/);
+  it('builds one bbox query for signs, lights, highways and ramps', () => {
+    const q = buildTileQuery({ south: 1, west: 2, north: 3, east: 4 });
+    const bbox = '(1.000000,2.000000,3.000000,4.000000)';
+    assert.match(q, /^\[out:json\]/);
+    assert.ok(q.includes(`node["highway"~"^(stop|traffic_signals)$"]${bbox}`));
+    assert.ok(q.includes(`way["highway"~"^(motorway|motorway_link)$"]${bbox}`));
+    assert.match(q, /out geom;$/);
   });
 
   it('parses direction tags', () => {
@@ -94,46 +98,78 @@ describe('overpass parsing', () => {
     assert.equal(parseDirectionTag(undefined), null);
   });
 
-  it('keeps only stop-sign nodes with coordinates', () => {
-    const signs = parseStopSigns({
+  it('parses maxspeed in mph and km/h', () => {
+    near(parseMaxspeed('65 mph')!, 29.06, 0.01);
+    near(parseMaxspeed('100')!, 27.78, 0.01);
+    near(parseMaxspeed('50 km/h')!, 13.89, 0.01);
+    assert.equal(parseMaxspeed('none'), null);
+    assert.equal(parseMaxspeed('signals'), null);
+    assert.equal(parseMaxspeed(undefined), null);
+  });
+
+  it('keeps stop signs, traffic lights and highway/ramp ways', () => {
+    const geometry = [
+      { lat: 35, lon: -78 },
+      { lat: 35.01, lon: -78 },
+    ];
+    const tile = parseTile({
       elements: [
         { type: 'node', id: 1, lat: 35, lon: -78, tags: { highway: 'stop', direction: 'S' } },
         { type: 'node', id: 2, lat: 35, lon: -78, tags: { highway: 'traffic_signals' } },
-        { type: 'way', id: 3, tags: { highway: 'stop' } },
-        { type: 'node', id: 4, lat: 35.1, lon: -78.1, tags: { highway: 'stop' } },
+        { type: 'node', id: 3, lat: 35, lon: -78, tags: { highway: 'crossing' } },
+        { type: 'way', id: 10, geometry, tags: { highway: 'motorway', maxspeed: '65 mph', ref: 'I 440' } },
+        { type: 'way', id: 11, geometry, tags: { highway: 'motorway_link', oneway: '-1' } },
+        { type: 'way', id: 12, geometry, tags: { highway: 'primary' } },
+        { type: 'way', id: 13, geometry: [geometry[0]], tags: { highway: 'motorway' } },
       ],
     });
-    assert.deepEqual(signs, [
-      { id: 1, lat: 35, lon: -78, facingDeg: 180, directionTag: 'S' },
-      { id: 4, lat: 35.1, lon: -78.1, facingDeg: null },
+    assert.deepEqual(tile.features, [
+      { id: 1, kind: 'stop', lat: 35, lon: -78, facingDeg: 180, directionTag: 'S' },
+      { id: 2, kind: 'traffic_signals', lat: 35, lon: -78, facingDeg: null },
     ]);
-    assert.deepEqual(parseStopSigns({}), []);
+    assert.deepEqual(
+      tile.roads.map((r) => [r.id, r.kind, r.oneway, r.ref]),
+      [
+        [10, 'motorway', 1, 'I 440'],
+        [11, 'motorway_link', -1, undefined],
+      ],
+    );
+    near(tile.roads[0].maxspeedMps!, 29.06, 0.01);
+    assert.equal(tile.roads[1].maxspeedMps, null);
+    assert.deepEqual(parseTile({}), { features: [], roads: [] });
   });
 });
 
-describe('signsAhead', () => {
-  const sign = (id: number, bearing: number, meters: number, facingDeg: number | null = null): StopSign => ({
-    id,
-    ...destination(RALEIGH, bearing, meters),
-    facingDeg,
-  });
+describe('featuresAhead', () => {
+  const feature = (
+    id: number,
+    bearing: number,
+    meters: number,
+    facingDeg: number | null = null,
+    kind: RoadFeature['kind'] = 'stop',
+  ): RoadFeature => ({ id, kind, ...destination(RALEIGH, bearing, meters), facingDeg });
   const car = { ...RALEIGH, heading: 0 };
 
-  it('keeps signs inside the cone and range, nearest first', () => {
-    const signs = [sign(1, 0, 150), sign(2, 20, 80), sign(3, 60, 50), sign(4, 180, 50), sign(5, 0, 400)];
-    const ahead = signsAhead(car, signs);
-    assert.deepEqual(ahead.map((s) => s.sign.id), [2, 1]);
+  it('keeps features inside the cone and range, nearest first', () => {
+    const fs = [feature(1, 0, 150), feature(2, 20, 80), feature(3, 60, 50), feature(4, 180, 50), feature(5, 0, 400)];
+    const ahead = featuresAhead(car, fs);
+    assert.deepEqual(ahead.map((s) => s.feature.id), [2, 1]);
     near(ahead[0].distanceM, 80, 0.01);
   });
 
-  it('drops signs that face a cross street', () => {
-    const facingUs = sign(1, 0, 100, 180); // northbound car reads a south-facing sign
-    const facingEast = sign(2, 5, 100, 90);
-    const facingAway = sign(3, -5, 100, 0);
-    assert.deepEqual(signsAhead(car, [facingUs, facingEast, facingAway]).map((s) => s.sign.id), [1]);
+  it('drops features that face a cross street', () => {
+    const facingUs = feature(1, 0, 100, 180); // northbound car reads a south-facing sign
+    const facingEast = feature(2, 5, 100, 90);
+    const facingAway = feature(3, -5, 100, 0);
+    assert.deepEqual(featuresAhead(car, [facingUs, facingEast, facingAway]).map((s) => s.feature.id), [1]);
+  });
+
+  it('filters by kind', () => {
+    const fs = [feature(1, 0, 100), feature(2, 0, 120, null, 'traffic_signals')];
+    assert.deepEqual(featuresAhead(car, fs, { kinds: ['traffic_signals'] }).map((s) => s.feature.id), [2]);
   });
 
   it('returns nothing without a heading', () => {
-    assert.deepEqual(signsAhead({ ...RALEIGH, heading: -1 }, [sign(1, 0, 100)]), []);
+    assert.deepEqual(featuresAhead({ ...RALEIGH, heading: -1 }, [feature(1, 0, 100)]), []);
   });
 });

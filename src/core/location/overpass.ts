@@ -1,38 +1,37 @@
-import { normalizeBearing } from './geo.ts';
-import type { BBox } from './tiles.ts';
+import { normalizeBearing, type LatLon } from './geo';
+import type { BBox } from './tiles';
+import type { RoadFeature, RoadKind, RoadWay, TileContents } from './types';
 
 // Pure Overpass helpers: build the query for a tile and parse the JSON reply.
 // The network call itself lives in src/integrations/location/overpassClient.ts.
-
-export type StopSign = {
-  /** OSM node id. */
-  id: number;
-  lat: number;
-  lon: number;
-  /**
-   * Compass bearing the sign face points toward, when OSM gives one as degrees
-   * or a cardinal (`direction=N`, `direction=225`). A sign facing north is read
-   * by traffic heading south. null when untagged or tagged `forward`/`backward`,
-   * which are relative to the way and need way geometry we don't fetch yet.
-   */
-  facingDeg: number | null;
-  /** Raw `direction` tag, kept for debugging and later forward/backward support. */
-  directionTag?: string;
-};
+//
+// One query per tile fetches everything the location coach needs:
+//   stop signs        node highway=stop
+//   traffic lights    node highway=traffic_signals
+//   highway + ramps   way  highway=motorway / motorway_link, with geometry
 
 export type OverpassElement = {
   type: string;
   id: number;
   lat?: number;
   lon?: number;
+  geometry?: LatLon[];
   tags?: Record<string, string>;
 };
 
 export type OverpassResponse = { elements?: OverpassElement[] };
 
-export function buildStopSignQuery(b: BBox, timeoutS = 25): string {
+const FEATURE_TAGS: Record<string, RoadFeature['kind']> = { stop: 'stop', traffic_signals: 'traffic_signals' };
+const ROAD_TAGS: Record<string, RoadKind> = { motorway: 'motorway', motorway_link: 'motorway_link' };
+
+export function buildTileQuery(b: BBox, timeoutS = 25): string {
   const bbox = [b.south, b.west, b.north, b.east].map((n) => n.toFixed(6)).join(',');
-  return `[out:json][timeout:${timeoutS}];node["highway"="stop"](${bbox});out body;`;
+  return (
+    `[out:json][timeout:${timeoutS}];(` +
+    `node["highway"~"^(stop|traffic_signals)$"](${bbox});` +
+    `way["highway"~"^(motorway|motorway_link)$"](${bbox});` +
+    `);out geom;`
+  );
 }
 
 const CARDINALS: Record<string, number> = {
@@ -49,19 +48,54 @@ export function parseDirectionTag(raw: string | undefined): number | null {
   return null;
 }
 
-export function parseStopSigns(res: OverpassResponse): StopSign[] {
-  const signs: StopSign[] = [];
+const MPH = 0.44704;
+const KMH = 1 / 3.6;
+
+/** Parse an OSM `maxspeed` value ("65 mph", "100", "50 km/h") into m/s. */
+export function parseMaxspeed(raw: string | undefined): number | null {
+  const m = raw?.trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(mph|km\/h|kmh|kph)?$/);
+  if (!m) return null; // "none", "signals", "US:urban", ...
+  return Number(m[1]) * (m[2] === 'mph' ? MPH : KMH);
+}
+
+/** Motorways and their ramps are one-way unless tagged otherwise. */
+function parseOneway(tags: Record<string, string>): RoadWay['oneway'] {
+  const v = tags.oneway;
+  if (v === '-1') return -1;
+  if (v === 'no') return 0;
+  return 1;
+}
+
+export function parseTile(res: OverpassResponse): TileContents {
+  const features: RoadFeature[] = [];
+  const roads: RoadWay[] = [];
   for (const el of res.elements ?? []) {
-    if (el.type !== 'node' || typeof el.lat !== 'number' || typeof el.lon !== 'number') continue;
-    if (el.tags?.highway !== 'stop') continue;
-    const directionTag = el.tags.direction;
-    signs.push({
-      id: el.id,
-      lat: el.lat,
-      lon: el.lon,
-      facingDeg: parseDirectionTag(directionTag),
-      ...(directionTag ? { directionTag } : {}),
-    });
+    const tags = el.tags ?? {};
+    if (el.type === 'node' && typeof el.lat === 'number' && typeof el.lon === 'number') {
+      const kind = FEATURE_TAGS[tags.highway];
+      if (!kind) continue;
+      const directionTag = tags.direction;
+      features.push({
+        id: el.id,
+        kind,
+        lat: el.lat,
+        lon: el.lon,
+        facingDeg: parseDirectionTag(directionTag),
+        ...(directionTag ? { directionTag } : {}),
+      });
+    } else if (el.type === 'way' && el.geometry && el.geometry.length >= 2) {
+      const kind = ROAD_TAGS[tags.highway];
+      if (!kind) continue;
+      roads.push({
+        id: el.id,
+        kind,
+        geometry: el.geometry.map(({ lat, lon }) => ({ lat, lon })),
+        oneway: parseOneway(tags),
+        maxspeedMps: parseMaxspeed(tags.maxspeed),
+        ...(tags.ref ? { ref: tags.ref } : {}),
+        ...(tags.name ? { name: tags.name } : {}),
+      });
+    }
   }
-  return signs;
+  return { features, roads };
 }

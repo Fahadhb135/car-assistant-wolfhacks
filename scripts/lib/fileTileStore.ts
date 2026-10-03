@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import type { TileData, TileStore } from '../../src/integrations/location/tileCache.ts';
+import type { TileData, TileStore } from '../../src/integrations/location/tileCache';
 
 // Saves tiles to .cache/tiles/ so dev scripts work when Overpass is busy.
 // Delete the folder to refetch.

@@ -1,5 +1,6 @@
-import { buildStopSignQuery, parseStopSigns, type OverpassResponse, type StopSign } from '../../core/location/overpass.ts';
-import type { BBox } from '../../core/location/tiles.ts';
+import { buildTileQuery, parseTile, type OverpassResponse } from '../../core/location/overpass';
+import type { BBox } from '../../core/location/tiles';
+import type { TileContents } from '../../core/location/types';
 
 // Thin network wrapper around the public Overpass API. Tries each mirror in
 // turn, with a per-request timeout, and moves on when a mirror is rate limited
@@ -45,8 +46,9 @@ export class OverpassClient {
     this.fetchFn = opts.fetchFn ?? ((...args) => fetch(...args));
   }
 
-  async fetchStopSigns(bbox: BBox): Promise<StopSign[]> {
-    const body = 'data=' + encodeURIComponent(buildStopSignQuery(bbox));
+  /** Stop signs, traffic lights and highway/ramp ways inside the box. */
+  async fetchTile(bbox: BBox): Promise<TileContents> {
+    const body = 'data=' + encodeURIComponent(buildTileQuery(bbox));
     const failures: string[] = [];
 
     for (const url of this.endpoints) {
@@ -67,7 +69,7 @@ export class OverpassClient {
           failures.push(`${url}: HTTP ${res.status}`);
           continue;
         }
-        return parseStopSigns((await res.json()) as OverpassResponse);
+        return parseTile((await res.json()) as OverpassResponse);
       } catch (err) {
         failures.push(`${url}: ${controller.signal.aborted ? 'timeout' : String(err)}`);
       } finally {
