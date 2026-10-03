@@ -6,7 +6,7 @@ An AI driving coach built on the **STMicroelectronics SensorTile.box**. A dash-m
 
 Track: **Applied AI Hardware+**. Collect, analyze and act on real sensor data; detect patterns/anomalies; deploy ML to edge/IoT devices.
 
-> Status: the Expo mobile scaffold, BLE/GATT diagnostic, and a mock-data UI flow for home, active drive, replay, and trip summary are implemented. The driving screens are ready to be connected to live session state; the STEVAL-MKBOXPRO v3.4.0 protocol profile is not yet decoded.
+> Status: the Expo mobile scaffold, BLE/GATT diagnostic, mock-data UI flow, and a pure-TypeScript heuristic IMU pipeline are implemented. The pipeline emits experimental crash and swerve candidate events from replay data; its thresholds are not validated safety thresholds. The STEVAL-MKBOXPRO v3.4.0 protocol profile is not yet decoded. See [the IMU pipeline guide](docs/imu-pipeline.md).
 
 ---
 
@@ -93,8 +93,8 @@ Notes:
 
 1. **Sensor to phone.** The SensorTile.box streams IMU packets over BLE. The app parses ST's characteristic format into `{t, ax, ay, az, gx, gy, gz}`.
 2. **Calibrate.** At the start of a trip, estimate the gravity vector and rotate samples into vehicle axes (forward / lateral / vertical).
-3. **Crash check.** Every sample goes through the threshold crash detector (see 6.1). A hit fires an immediate local alert.
-4. **Window and infer.** Samples are windowed (about 2 s, 50% overlap), turned into features, and scored by the on-device erratic-driving model. High scores emit `erratic_driving` events.
+3. **Crash check.** Every sample goes through the threshold crash detector (see 6.1). The current implementation emits an experimental `crash_candidate`; alert wiring and real-data tuning are follow-up work.
+4. **Window and infer.** The current implementation uses timestamp windows and a deterministic swerve heuristic to emit `swerve_candidate`. The planned on-device erratic-driving model can later consume the same features after real drives are collected and evaluated.
 5. **Location coach.** GPS plus heading are matched against cached stop-sign data (see Section 7). Emits `stop_sign_ahead` and `stop_sign_violation` events.
 6. **Speak.** Events go to a priority queue, then ElevenLabs (cached audio for fixed phrases), plus a local notification and on-screen banner.
 7. **Talk back.** The driver can speak to the assistant through Gemini Live ("how was that turn?"). The phone fetches a short-lived token from the cloud service and connects directly. Trip context is passed in so answers are specific. Transcripts are stored with the trip.
@@ -169,7 +169,7 @@ Live detection, alerts and the stop-sign coach need no network. The network is u
 - A short confirmation window cuts false positives (potholes, dropped sensor) before escalating to the "Are you OK?" flow. The 4 g figure is an assumption to tune on real data.
 
 ### 6.2 Swerve / erratic driving (edge model)
-We have no labeled "drunk" data and cannot ethically collect it. So we **do not claim intoxication detection**. We detect **impaired / erratic driving patterns**.
+We have no labeled "drunk" data and cannot ethically collect it. So we **do not claim intoxication detection**. The current code emits experimental `swerve_candidate` events from configurable heuristics; the model described below is a later phase after real-data collection and evaluation.
 
 - **Features per window:** lateral accel stats, yaw-rate variance, zero-crossing rate of yaw (weaving frequency), jerk, longitudinal accel spikes, dominant frequency of lateral motion.
 - **Model:** unsupervised anomaly detection (Isolation Forest baseline; optional small autoencoder). The first version is trained **offline in Python** on normal driving we record ourselves. Later versions are retrained in Databricks on pooled opted-in drives and delivered over the air.
@@ -228,11 +228,15 @@ No network API. Modules talk over an in-app event bus.
 type Sample = { t: number; ax: number; ay: number; az: number; gx: number; gy: number; gz: number };
 type GpsFix = { t: number; lat: number; lon: number; speed: number; heading: number };
 
-type DriveEvent =
-  | { kind: 'crash'; severity: 'critical'; confirmed: boolean }
-  | { kind: 'erratic_driving'; severity: 'warn'; score: number }
-  | { kind: 'stop_sign_ahead'; severity: 'info'; distanceM: number }
-  | { kind: 'stop_ok' | 'rolling_stop' | 'ran_stop'; severity: 'info' | 'warn' };
+type DriveEvent = {
+  kind: 'crash_candidate' | 'swerve_candidate';
+  occurredAtMs: number;
+  severity: 'warning' | 'critical';
+  confidence: number;
+  evidence: Readonly<Record<string, number>>;
+};
+
+// Location and coaching modules will extend the domain event union separately.
 ```
 
 Module boundaries: `ble/` → `pipeline/` (calibrate, window, features) → `detectors/` (crash, erratic) and `location/` (tiles, coach) → `events/` bus → `voice/` and `ui/`. Replay mode swaps `ble/` and GPS for a recorded-file source, so everything downstream is identical in live and replay. A separate `sync/` module owns the upload queue and model updates, and never blocks the live path.
