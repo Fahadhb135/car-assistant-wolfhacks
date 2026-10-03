@@ -1,6 +1,6 @@
 # Heuristic IMU processing pipeline
 
-The first on-device processing slice turns normalized `ImuSample` measurements into deterministic **candidate** events. It is pure TypeScript and can consume synthetic/replayed samples now and BLE-decoded samples later.
+The on-device processing pipeline turns normalized `ImuSample` measurements into deterministic **candidate** events. It is pure TypeScript and consumes both synthetic/replayed samples and the live BLE-decoded STEVAL-MKBOXPRO stream.
 
 ```text
 SensorSource -> ImuSample -> validation and health
@@ -51,17 +51,26 @@ if (result.accepted) {
 
 Thresholds and resource limits are constructor-configurable through `PartialImuPipelineConfig`. Call `reset()` between trips to clear validation history, buffers, window scheduling, detector latches, cooldowns, and health metrics.
 
-`ReplaySensorSource` implements the same `SensorSource` boundary as live input. Deterministic stationary, normal-motion, pothole-like, impact, and repeated-rotation fixtures support development without Bluetooth.
+`ReplaySensorSource` and `StevalMkboxProSensorSource` implement the same `SensorSource` boundary. Deterministic stationary, normal-motion, pothole-like, impact, and repeated-rotation fixtures support development without Bluetooth.
 
-## Connecting BLE later
+## Live Bluetooth boundary
 
-The board-specific adapter will perform only this conversion:
+The hardware integration performs this conversion:
 
 ```text
-STEVAL-MKBOXPRO notification bytes -> versioned decoder -> ImuSample -> ImuPipeline
+STEVAL-MKBOXPRO notification bytes
+  -> DATALOG2 v3.4 profile and strict batch decoder
+  -> bounded accelerometer/gyroscope FIFO synchronization
+  -> synthetic 120 Hz timestamps and local sequence
+  -> ImuSample
+  -> ImuPipeline
 ```
 
-It must confirm packet layout, units, axes, counter behavior, and sample rate from the v3.4.0 GATT stream. The core pipeline should not import `react-native-ble-plx` or change when the decoder is added.
+DATALOG2 sends accelerometer and gyroscope data in separate 40-sample packets without timestamps or packet sequence numbers. `StevalImuSynchronizer` pairs batches by arrival ordinal, anchors the first completed pair to BLE receive time, and advances a synthetic clock by `1000 / 120` ms per sample. Queue bounds prevent unbounded growth; a sustained sensor imbalance drops queued batches and reports a resynchronization error.
+
+This alignment is best effort: the payload cannot prove perfect cross-sensor alignment or detect every lost BLE packet. Scale factors are explicit in the v3.4 profile and remain provisional until verified from the firmware's `st_ble_stream.*.multiply_factor` response. The output remains in the raw sensor frame.
+
+The hardware-specific code stays under `src/integrations/bluetooth`; `src/core/imu` does not import Bluetooth or React Native.
 
 Before enabling real driver alerts, collect physical SensorTile recordings to measure mounting behavior, normal vibration, packet gaps, false positives per hour, and threshold sensitivity. Log candidate events during that tuning phase rather than presenting them as confirmed safety events.
 

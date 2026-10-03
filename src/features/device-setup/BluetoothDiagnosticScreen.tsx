@@ -11,25 +11,26 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import type { DriveEvent } from '@/core/events/types';
+import { ImuPipeline, type StreamHealthSnapshot } from '@/core/imu';
+import type { ImuSample } from '@/core/sensors/types';
 import {
   filterByProximity,
-  frameStPnplCommand,
   isStMicroelectronicsDevice,
   manufacturerDataHex,
   parseRawStreamPacket,
   PROXIMITY_MIN_RSSI,
   ReactNativeBleClient,
-  ST_FEATURE_SERVICE_UUID,
   ST_PNPL_CHARACTERISTIC_UUID,
   ST_RAW_STREAM_CHARACTERISTIC_UUID,
-  startImuStreamCommands,
+  StevalMkboxProSensorSource,
   StPnplResponseAssembler,
-  stopImuStreamCommands,
   StreamMetrics,
   type BluetoothDeviceSummary,
   type ProximityFilter,
   type GattServiceSnapshot,
   type RawBlePacket,
+  type StevalSourceDiagnostics,
 } from '@/integrations/bluetooth';
 import { base64ToBytes } from '@/integrations/bluetooth/base64';
 import type { StreamMetricsSnapshot } from '@/integrations/bluetooth/StreamMetrics';
@@ -43,10 +44,7 @@ const EMPTY_METRICS: StreamMetricsSnapshot = {
 };
 
 const PNPL_LOG_LIMIT = 20;
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const EVENT_LOG_LIMIT = 20;
 
 const PROXIMITY_OPTIONS: readonly { value: ProximityFilter; label: string }[] = [
   { value: 'veryClose', label: 'Very close' },
@@ -56,11 +54,16 @@ const PROXIMITY_OPTIONS: readonly { value: ProximityFilter; label: string }[] = 
 
 export function BluetoothDiagnosticScreen() {
   const clientRef = useRef<ReactNativeBleClient | null>(null);
+  const sourceRef = useRef<StevalMkboxProSensorSource | null>(null);
+  const pipelineRef = useRef(new ImuPipeline());
   const metricsRef = useRef(new StreamMetrics());
   const packetPreviewRef = useRef<RawBlePacket[]>([]);
   const pnplAssemblerRef = useRef(new StPnplResponseAssembler());
   const pnplLogRef = useRef<string[]>([]);
   const sensorPacketCountsRef = useRef<Record<number, number>>({});
+  const latestSampleRef = useRef<ImuSample | null>(null);
+  const pipelineHealthRef = useRef<StreamHealthSnapshot | null>(null);
+  const eventLogRef = useRef<DriveEvent[]>([]);
 
   const [status, setStatus] = useState('Ready to scan');
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +77,10 @@ export function BluetoothDiagnosticScreen() {
   const [stOnly, setStOnly] = useState(false);
   const [pnplLog, setPnplLog] = useState<readonly string[]>([]);
   const [sensorPacketCounts, setSensorPacketCounts] = useState<Record<number, number>>({});
+  const [sourceDiagnostics, setSourceDiagnostics] = useState<StevalSourceDiagnostics | null>(null);
+  const [latestSample, setLatestSample] = useState<ImuSample | null>(null);
+  const [pipelineHealth, setPipelineHealth] = useState<StreamHealthSnapshot | null>(null);
+  const [eventLog, setEventLog] = useState<readonly DriveEvent[]>([]);
 
   if (!clientRef.current && Platform.OS !== 'web') {
     clientRef.current = new ReactNativeBleClient();
@@ -85,12 +92,26 @@ export function BluetoothDiagnosticScreen() {
       setPackets([...packetPreviewRef.current]);
       setPnplLog([...pnplLogRef.current]);
       setSensorPacketCounts({ ...sensorPacketCountsRef.current });
+      setSourceDiagnostics(sourceRef.current?.getDiagnostics() ?? null);
+      setLatestSample(latestSampleRef.current);
+      setPipelineHealth(pipelineHealthRef.current);
+      setEventLog([...eventLogRef.current]);
     }, 1_000);
 
     return () => {
       clearInterval(timer);
-      void clientRef.current?.destroy();
+      const source = sourceRef.current;
+      const client = clientRef.current;
+      sourceRef.current = null;
       clientRef.current = null;
+      void (async () => {
+        try {
+          await source?.stop();
+        } catch {
+          // Best-effort cleanup while the screen is unmounting.
+        }
+        await client?.destroy();
+      })();
     };
   }, []);
 
@@ -156,7 +177,12 @@ export function BluetoothDiagnosticScreen() {
     setStatus(`Connecting to ${device.localName ?? device.name ?? device.id}…`);
 
     try {
+      if (sourceRef.current?.getDiagnostics().state === 'running') {
+        await sourceRef.current.stop();
+      }
+      sourceRef.current = null;
       const discoveredServices = await clientRef.current.connectAndInspect(device.id);
+      sourceRef.current = new StevalMkboxProSensorSource(clientRef.current);
       setServices(discoveredServices);
       setStatus(`Connected; discovered ${discoveredServices.length} services`);
       console.info('[BLE GATT snapshot]', JSON.stringify(discoveredServices, null, 2));
@@ -173,35 +199,60 @@ export function BluetoothDiagnosticScreen() {
     pnplLogRef.current = [...pnplLogRef.current, line].slice(-PNPL_LOG_LIMIT);
   }
 
-  async function sendPnplCommands(commands: readonly string[], label: string) {
-    if (!clientRef.current) {
-      return;
-    }
+  async function startLivePipeline() {
+    const source = sourceRef.current;
+    if (!source) return;
 
     setBusy(true);
     setError(null);
-    setStatus(`${label}…`);
+    setStatus('Starting normalized IMU pipeline…');
+    pipelineRef.current.reset();
+    latestSampleRef.current = null;
+    pipelineHealthRef.current = null;
+    eventLogRef.current = [];
 
     try {
-      for (const command of commands) {
-        console.info('[BLE PnPL command]', command);
-        logPnpl(`→ ${command}`);
-        for (const packet of frameStPnplCommand(command)) {
-          await clientRef.current.writeWithoutResponse(
-            ST_FEATURE_SERVICE_UUID,
-            ST_PNPL_CHARACTERISTIC_UUID,
-            packet,
-          );
-          // Write-without-response has no flow control; pace the chunks.
-          await delay(20);
-        }
-        // Give the board time to apply each setting and reply.
-        await delay(300);
-      }
-      setStatus(`${label}: sent ${commands.length} commands`);
-    } catch (commandError) {
-      setError(commandError instanceof Error ? commandError.message : String(commandError));
-      setStatus(`${label} failed`);
+      await source.start(
+        (sample) => {
+          latestSampleRef.current = sample;
+          const result = pipelineRef.current.process(sample);
+          pipelineHealthRef.current = result.health;
+          if (result.events.length > 0) {
+            eventLogRef.current = [...eventLogRef.current, ...result.events].slice(-EVENT_LOG_LIMIT);
+            for (const event of result.events) {
+              console.info('[IMU candidate event]', JSON.stringify(event));
+            }
+          }
+        },
+        (sourceError) => {
+          console.warn('[BLE IMU source error]', sourceError.message);
+          setError(sourceError.message);
+        },
+      );
+      setSourceDiagnostics(source.getDiagnostics());
+      setStatus('Live normalized IMU pipeline running');
+    } catch (sourceError) {
+      setError(sourceError instanceof Error ? sourceError.message : String(sourceError));
+      setStatus('Could not start live IMU pipeline');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function stopLivePipeline() {
+    const source = sourceRef.current;
+    if (!source) return;
+
+    setBusy(true);
+    setError(null);
+    setStatus('Stopping normalized IMU pipeline…');
+    try {
+      await source.stop();
+      setSourceDiagnostics(source.getDiagnostics());
+      setStatus('Live normalized IMU pipeline stopped');
+    } catch (sourceError) {
+      setError(sourceError instanceof Error ? sourceError.message : String(sourceError));
+      setStatus('IMU pipeline stopped with an error');
     } finally {
       setBusy(false);
     }
@@ -346,32 +397,81 @@ export function BluetoothDiagnosticScreen() {
             ))}
 
             <Button
-              title="Monitor notifiable characteristics"
+              title="Monitor all characteristics (raw diagnostic)"
               onPress={monitorNotifications}
-              disabled={busy || services.length === 0}
+              disabled={busy || services.length === 0 || sourceDiagnostics?.state === 'running'}
             />
 
-            <Text style={styles.sectionHeading}>ST DATALOG2 IMU stream</Text>
+            <Text style={styles.sectionHeading}>ST DATALOG2 live IMU pipeline</Text>
             <Text>
-              Start monitoring first. Start sends PnPL commands that enable the accelerometer and
-              gyroscope at 120 Hz and start a log (the board needs an SD card).
+              Start subscribes only to PnPL and raw data, awaits every setup acknowledgement,
+              normalizes paired samples at 120 Hz, and feeds the candidate-event pipeline. The board
+              needs an SD card. Candidate events are experimental diagnostics, not confirmed safety
+              detections.
             </Text>
             <Button
-              title="Start IMU stream"
-              onPress={() => void sendPnplCommands(startImuStreamCommands(), 'Starting IMU stream')}
-              disabled={busy || metrics.monitoredCharacteristicCount === 0}
+              title="Start live IMU pipeline"
+              onPress={() => void startLivePipeline()}
+              disabled={busy || services.length === 0 || sourceDiagnostics?.state === 'running'}
             />
             <Button
-              title="Stop IMU stream"
-              onPress={() => void sendPnplCommands(stopImuStreamCommands(), 'Stopping IMU stream')}
-              disabled={busy || metrics.monitoredCharacteristicCount === 0}
+              title="Stop live IMU pipeline"
+              onPress={() => void stopLivePipeline()}
+              disabled={busy || sourceDiagnostics?.state !== 'running'}
             />
             <Text>
-              Stream packets by sensor ID:{' '}
+              Raw diagnostic packets by sensor ID:{' '}
               {Object.entries(sensorPacketCounts)
                 .map(([sensorId, count]) => `#${sensorId}: ${count}`)
                 .join(', ') || 'none yet'}
             </Text>
+            {sourceDiagnostics ? (
+              <View style={styles.liveDiagnostics}>
+                <Text>Source state: {sourceDiagnostics.state}</Text>
+                <Text>Setup commands accepted: {sourceDiagnostics.acceptedCommandCount}/9</Text>
+                <Text>Decoded batches: {sourceDiagnostics.decodedBatchCount}</Text>
+                <Text>Decoded vectors: {sourceDiagnostics.decodedVectorCount}</Text>
+                <Text>Normalized samples: {sourceDiagnostics.emittedSampleCount}</Text>
+                <Text>Normalized samples/second: {sourceDiagnostics.estimatedSampleRateHz.toFixed(1)}</Text>
+                <Text>
+                  Largest paired-batch arrival gap:{' '}
+                  {sourceDiagnostics.largestPairInterarrivalGapMs.toFixed(1)} ms
+                </Text>
+                <Text>Rejected packets: {sourceDiagnostics.rejectedPacketCount}</Text>
+                <Text>Unknown sensor IDs: {sourceDiagnostics.unknownSensorIdCount}</Text>
+                <Text>
+                  Queue depth: acc {sourceDiagnostics.accelerometerQueueDepth}, gyro{' '}
+                  {sourceDiagnostics.gyroscopeQueueDepth}
+                </Text>
+                <Text>
+                  Resynchronizations: {sourceDiagnostics.queueResynchronizationCount} (dropped{' '}
+                  {sourceDiagnostics.droppedBatchCount} batches)
+                </Text>
+              </View>
+            ) : null}
+            {latestSample ? (
+              <Text selectable style={styles.packet}>
+                Latest normalized sample #{latestSample.sequence}{'\n'}
+                acceleration g: {latestSample.accelerationG.x.toFixed(3)},{' '}
+                {latestSample.accelerationG.y.toFixed(3)}, {latestSample.accelerationG.z.toFixed(3)}{'\n'}
+                angular velocity dps: {latestSample.angularVelocityDps.x.toFixed(1)},{' '}
+                {latestSample.angularVelocityDps.y.toFixed(1)},{' '}
+                {latestSample.angularVelocityDps.z.toFixed(1)}
+              </Text>
+            ) : null}
+            {pipelineHealth ? (
+              <Text>
+                Pipeline: {pipelineHealth.acceptedCount} accepted, {pipelineHealth.rejectedCount}{' '}
+                rejected, {pipelineHealth.estimatedSampleRateHz.toFixed(1)} Hz, largest gap{' '}
+                {pipelineHealth.largestInterSampleGapMs.toFixed(1)} ms
+              </Text>
+            ) : null}
+            <Text>Candidate events ({eventLog.length}/{EVENT_LOG_LIMIT})</Text>
+            {eventLog.map((event, index) => (
+              <Text selectable key={`${event.kind}-${event.occurredAtMs}-${index}`} style={styles.packet}>
+                {event.kind} · {event.severity} · confidence {event.confidence.toFixed(2)}
+              </Text>
+            ))}
             {pnplLog.map((line, index) => (
               <Text selectable key={`${index}-${line}`} style={styles.packet}>
                 {line}
@@ -419,5 +519,6 @@ const styles = StyleSheet.create({
   service: { borderColor: '#bbb', borderWidth: 1, gap: 8, padding: 10 },
   serviceUuid: { fontWeight: '700' },
   characteristic: { fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }) },
+  liveDiagnostics: { backgroundColor: '#eef5ff', gap: 4, padding: 10 },
   packet: { backgroundColor: '#eee', fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }), padding: 8 },
 });

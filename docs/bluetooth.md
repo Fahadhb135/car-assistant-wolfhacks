@@ -1,6 +1,6 @@
 # STEVAL-MKBOXPRO Bluetooth diagnostics
 
-The first mobile milestone discovers the GATT contract exposed by the STEVAL-MKBOXPRO factory firmware v3.4.0. The board advertises as `HSD2v34`, ST's DATALOG2 (High Speed Datalog 2) firmware v3.4. Generic monitoring does not hardcode UUIDs; the **Start IMU stream** button uses the DATALOG2 PnPL and raw-stream characteristics documented in [steval-mkboxpro-results.md](steval-mkboxpro-results.md).
+The mobile app supports the GATT contract exposed by the STEVAL-MKBOXPRO factory firmware v3.4.0. The board advertises as `HSD2v34`, ST's DATALOG2 (High Speed Datalog 2) firmware v3.4. The diagnostic screen retains broad GATT monitoring for protocol investigation and adds a production-shaped **Start live IMU pipeline** path that uses only the PnPL and raw-stream characteristics documented in [steval-mkboxpro-results.md](steval-mkboxpro-results.md).
 
 ## Prerequisites
 
@@ -38,25 +38,25 @@ The computer running Metro and the iPhone should be on the same network. Do not 
 3. Select the STEVAL-MKBOXPRO using the advertised name observed in ST BLE Sensor. Hold the board next to the phone and use the **Range** filter to hide distant devices: **Very close** (RSSI ≥ −55 dBm), **Nearby** (≥ −70 dBm, the default) or **All**. The list is sorted strongest signal first. Signal strength is recorded when a device is first seen, so if the board was far away during the scan, move it closer and tap **Start scan** again. Devices whose manufacturer data starts with STMicroelectronics' Bluetooth company ID (`0x0030`, bytes `30 00`) get an **ST** badge, and **STMicroelectronics devices only** hides everything else. If the board advertises without manufacturer data it will not be tagged, so turn the toggle off if nothing appears.
 4. Wait for service discovery.
 5. Copy the `[BLE GATT snapshot]` entry from the Metro or Xcode console.
-6. Tap **Monitor notifiable characteristics**.
-7. Tap **Start IMU stream**. It sends the DATALOG2 PnPL commands that enable the accelerometer and gyroscope at 120 Hz and start a log. Each command and the board's reply appear on screen and in Metro as `[BLE PnPL command]` / `[BLE PnPL response]`.
-8. Move the board and look for increasing **Stream packets by sensor ID**, `[BLE packet]` entries and stream metrics.
-9. Tap **Stop IMU stream** when done. This also stops the SD-card log.
+6. Optionally tap **Monitor all characteristics (raw diagnostic)** to inspect unknown characteristics. Only the first 20 payloads are retained; counters update once per second.
+7. Tap **Start live IMU pipeline**. This replaces broad monitoring with targeted PnPL/raw subscriptions, sends each DATALOG2 command only after the prior command is acknowledged, and starts the required SD-card log.
+8. Move the board and watch the throttled source diagnostics, normalized values, pipeline health, and candidate-event log. The live source decodes and pairs the separate 40-sample accelerometer and gyroscope batches at 120 Hz without placing every sample in React state.
+9. Tap **Stop live IMU pipeline** when done. The source sends `stop_log`, removes subscriptions, and clears its synchronization queues.
 
-Only the first 20 packet payloads are retained and logged. Stream counters update once per second so sensor notifications do not cause a React render for every packet.
+Candidate events are experimental diagnostics. They are not confirmed crashes or swerves and do not trigger alerts or emergency behavior.
 
-Monitoring every notifiable characteristic is a discovery tool, not the final data path. Factory firmware may require a write command to enable its motion stream. Once the v3.4.0 services and commands are confirmed, replace broad monitoring with a versioned STEVAL-MKBOXPRO profile.
+Monitoring every notifiable characteristic remains a discovery tool. The normalized path is implemented by the versioned profile, decoder, synchronizer, and source under `src/integrations/bluetooth/`.
 
 ## Data to return to the team
 
-Results so far are recorded in [steval-mkboxpro-results.md](steval-mkboxpro-results.md).
+Results so far are recorded in [steval-mkboxpro-results.md](steval-mkboxpro-results.md). For each physical validation run, record:
 
-- Advertised device name
-- GATT snapshot JSON
-- UUIDs whose counters change while the board moves
-- First captured packets for each active characteristic
-- Notifications and packets per second
-- Any connection or permission error
+- Normalized samples per second and decoded batch counts
+- Rejected packet, unknown sensor ID, queue resynchronization, and dropped-batch counts
+- Pipeline sample rate and largest sample gap
+- Stationary acceleration magnitude and gyroscope magnitude
+- Whether two consecutive start/stop cycles succeed
+- Any connection, command, subscription, or decoding error
 
 Do not include a personal location trace or credentials in diagnostic output.
 

@@ -2,7 +2,7 @@
 
 Results from the BLE diagnostic in [bluetooth.md](bluetooth.md), captured on 2026-10-03 with an iPhone 16 Pro Max (iOS 26.6.1) running the Expo dev build.
 
-> Status: GATT layout captured. The board runs ST's **DATALOG2 (High Speed Datalog 2) v3.4** firmware. Subscribing alone produces no packets: DATALOG2 only streams once the sensors are enabled for BLE and a log is started with PnPL commands. The diagnostic's **Start IMU stream** button sends that sequence. **Run 2 confirmed live accelerometer and gyroscope data over BLE.**
+> Status: GATT layout captured. The board runs ST's **DATALOG2 (High Speed Datalog 2) v3.4** firmware. Subscribing alone produces no packets: DATALOG2 only streams once the sensors are enabled for BLE and a log is started with PnPL commands. The diagnostic's **Start live IMU pipeline** button sends that sequence and feeds normalized samples into the heuristic pipeline. **Run 2 confirmed live accelerometer and gyroscope data over BLE.**
 
 ## Firmware
 
@@ -143,7 +143,7 @@ Verified against the `fp-sns-datalog2` source (`BLE_Implementation.c`, `DatalogA
 2. **Each sensor's `st_ble_stream` is enabled** via PnPL.
 3. **A log is running.** `log_controller*start_log` with `interface: 0` (SD) also starts the BLE stream, and there is no separate BLE-only start, so **an SD card is required**.
 
-Commands sent by **Start IMU stream**, in order, written to `0x1b`:
+Commands sent by **Start live IMU pipeline**, in order, written to `0x1b`:
 
 ```json
 {"lsm6dsv16x_acc":{"enable":true}}
@@ -172,6 +172,16 @@ Commands sent by **Start IMU stream**, in order, written to `0x1b`:
 
 **Still open.** Confirm the scale factors from `st_ble_stream.*.multiply_factor`. Measure the sustained sample rate over a longer run.
 
+## Normalized application path
+
+The app now isolates this firmware contract in `STEVAL_MKBOXPRO_DATALOG2_V34_PROFILE`. `StevalMkboxProSensorSource` subscribes only to `0x1b` and `0x23`, awaits a successful response for every setup command, decodes signed little-endian values, pairs accelerometer and gyroscope batches FIFO, and emits normalized `ImuSample` values into `ImuPipeline`.
+
+The source generates a local sequence and 120 Hz synthetic timestamp because the raw payload contains neither. The first paired batch is backfilled from its BLE receive time; later samples advance by `1000 / 120` ms. Queues are bounded and reset with a reported error after sustained imbalance. This prevents unbounded memory use but cannot guarantee recovery from packet loss or prove perfect cross-sensor alignment.
+
+The diagnostic UI refreshes normalized values, source counters, pipeline health, and candidate events approximately once per second. All samples are still processed; high-rate samples are not stored in React state. Candidate events remain experimental diagnostics.
+
+The datasheet scale factors above remain explicitly provisional in the profile. Physical validation must confirm them and capture stationary magnitudes, sustained rates, largest gaps, rejection counts, and resynchronizations.
+
 ## First packets
 
 Run 2, first stream packets (hex, truncated):
@@ -183,12 +193,11 @@ Run 2, first stream packets (hex, truncated):
 
 ## Stream metrics
 
-| Metric | Value |
+| Run | Result |
 |---|---|
-| Packets | 0 |
-| Bytes | 0 |
-| Packets per second | 0.0 |
-| Largest packet gap | 0.0 ms |
+| Run 1, notifications only | 0 packets, 0 bytes, 0.0 packets/s, 0.0 ms largest gap |
+| Run 2, PnPL stream enabled | Live 241-byte accelerometer and gyroscope packets confirmed; sustained metrics were not retained in the capture |
+| Normalized source validation | Pending a 60-second physical iPhone run; record sample rate, largest gap, rejected packets, and resynchronizations |
 
 ## Errors
 
