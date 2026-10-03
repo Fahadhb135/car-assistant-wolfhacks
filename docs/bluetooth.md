@@ -35,7 +35,7 @@ The computer running Metro and the iPhone should be on the same network. Do not 
 
 1. Open the diagnostic app.
 2. Tap **Start scan**.
-3. Select the STEVAL-MKBOXPRO using the advertised name observed in ST BLE Sensor. Hold the board next to the phone and use the **Range** filter to hide distant devices: **Very close** (RSSI ≥ −55 dBm), **Nearby** (≥ −70 dBm, the default) or **All**. The list is sorted strongest signal first. Signal strength is recorded when a device is first seen, so if the board was far away during the scan, move it closer and tap **Start scan** again.
+3. Select the STEVAL-MKBOXPRO using the advertised name observed in ST BLE Sensor. Hold the board next to the phone and use the **Range** filter to hide distant devices: **Very close** (RSSI ≥ −55 dBm), **Nearby** (≥ −70 dBm, the default) or **All**. The list is sorted strongest signal first. Signal strength is recorded when a device is first seen, so if the board was far away during the scan, move it closer and tap **Start scan** again. Devices whose manufacturer data starts with STMicroelectronics' Bluetooth company ID (`0x0030`, bytes `30 00`) get an **ST** badge, and **STMicroelectronics devices only** hides everything else. If the board advertises without manufacturer data it will not be tagged, so turn the toggle off if nothing appears.
 4. Wait for service discovery.
 5. Copy the `[BLE GATT snapshot]` entry from the Metro or Xcode console.
 6. Tap **Monitor notifiable characteristics**.

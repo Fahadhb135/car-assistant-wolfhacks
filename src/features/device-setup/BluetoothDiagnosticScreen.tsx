@@ -5,6 +5,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native';
@@ -12,6 +13,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   filterByProximity,
+  isStMicroelectronicsDevice,
+  manufacturerDataHex,
   PROXIMITY_MIN_RSSI,
   ReactNativeBleClient,
   StreamMetrics,
@@ -50,6 +53,7 @@ export function BluetoothDiagnosticScreen() {
   const [metrics, setMetrics] = useState<StreamMetricsSnapshot>(EMPTY_METRICS);
   const [busy, setBusy] = useState(false);
   const [proximity, setProximity] = useState<ProximityFilter>('nearby');
+  const [stOnly, setStOnly] = useState(false);
 
   if (!clientRef.current && Platform.OS !== 'web') {
     clientRef.current = new ReactNativeBleClient();
@@ -70,8 +74,11 @@ export function BluetoothDiagnosticScreen() {
 
   const allDevices = useMemo(() => Object.values(devices), [devices]);
   const sortedDevices = useMemo(
-    () => filterByProximity(allDevices, proximity),
-    [allDevices, proximity],
+    () =>
+      filterByProximity(allDevices, proximity).filter(
+        (device) => !stOnly || isStMicroelectronicsDevice(device),
+      ),
+    [allDevices, proximity, stOnly],
   );
 
   async function startScan() {
@@ -205,6 +212,11 @@ export function BluetoothDiagnosticScreen() {
           })}
         </View>
 
+        <View style={styles.toggleRow}>
+          <Text>STMicroelectronics devices only</Text>
+          <Switch value={stOnly} onValueChange={setStOnly} />
+        </View>
+
         <Text style={styles.sectionHeading}>
           Discovered devices ({sortedDevices.length} of {allDevices.length}, strongest first)
         </Text>
@@ -216,12 +228,16 @@ export function BluetoothDiagnosticScreen() {
             onPress={() => void connect(device)}
             style={styles.device}
           >
-            <Text selectable style={styles.deviceName}>
-              {device.localName ?? device.name ?? 'Unnamed BLE device'}
-            </Text>
+            <View style={styles.deviceTitleRow}>
+              <Text selectable style={styles.deviceName}>
+                {device.localName ?? device.name ?? 'Unnamed BLE device'}
+              </Text>
+              {isStMicroelectronicsDevice(device) ? <Text style={styles.stBadge}>ST</Text> : null}
+            </View>
             <Text selectable>ID: {device.id}</Text>
             <Text>RSSI: {device.rssi ?? 'unknown'}</Text>
             <Text selectable>Advertised services: {device.serviceUuids.join(', ') || 'none'}</Text>
+            <Text selectable>Manufacturer data: {manufacturerDataHex(device) ?? 'none'}</Text>
           </Pressable>
         ))}
 
@@ -287,7 +303,10 @@ const styles = StyleSheet.create({
   proximityHint: { fontSize: 12, opacity: 0.7 },
   error: { color: '#b00020' },
   device: { borderColor: '#999', borderRadius: 6, borderWidth: 1, gap: 4, padding: 12 },
-  deviceName: { fontWeight: '700' },
+  deviceName: { flexShrink: 1, fontWeight: '700' },
+  deviceTitleRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  stBadge: { backgroundColor: '#03234b', borderRadius: 4, color: '#fff', fontSize: 12, fontWeight: '700', overflow: 'hidden', paddingHorizontal: 6, paddingVertical: 2 },
+  toggleRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   service: { borderColor: '#bbb', borderWidth: 1, gap: 8, padding: 10 },
   serviceUuid: { fontWeight: '700' },
   characteristic: { fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }) },
