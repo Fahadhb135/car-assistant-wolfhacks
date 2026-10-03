@@ -1,0 +1,29 @@
+node_modules/
+.expo/
+dist/
+web-build/
+
+# Generated native projects
+/android/
+/ios/
+
+# Native credentials and build output
+.kotlin/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Local environment and logs
+.env
+.env*.local
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# Tooling and operating systems
+*.tsbuildinfo
+.DS_Store
+.metro-health-check*
