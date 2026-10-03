@@ -100,12 +100,15 @@ export class ReactNativeBleClient implements BluetoothClient {
     console.info('[BLE connect] connecting', deviceId);
     const connected = await this.manager.connectToDevice(deviceId, { timeout: 10_000 });
     console.info('[BLE connect] connected; discovering services');
+    const discoveryStartedMs = monotonicNow();
     this.connectedDevice = await withTimeout(
       connected.discoverAllServicesAndCharacteristics(),
-      15_000,
-      'Service discovery timed out after 15 s.',
+      60_000,
+      'Service discovery timed out after 60 s.',
     );
-    console.info('[BLE connect] discovery complete');
+    console.info(
+      `[BLE connect] discovery complete in ${Math.round(monotonicNow() - discoveryStartedMs)} ms`,
+    );
 
     const services = await this.connectedDevice.services();
     this.gattServices = await Promise.all(
