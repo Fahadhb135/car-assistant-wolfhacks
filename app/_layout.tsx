@@ -1,13 +1,28 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { PaperProvider } from 'react-native-paper';
+
+import { appTheme, colors } from '@/theme';
 
 export default function RootLayout() {
   return (
-    <>
-      <Stack>
-        <Stack.Screen name="index" options={{ title: 'Bluetooth diagnostics' }} />
+    <PaperProvider theme={appTheme}>
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.cream } }}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="drive" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="trips/[id]" />
+        <Stack.Screen
+          name="diagnostics"
+          options={{
+            headerShown: true,
+            title: 'Bluetooth diagnostics',
+            headerStyle: { backgroundColor: colors.cream },
+            headerTintColor: colors.ink,
+            headerShadowVisible: false,
+          }}
+        />
       </Stack>
-      <StatusBar style="auto" />
-    </>
+      <StatusBar style="dark" />
+    </PaperProvider>
   );
 }

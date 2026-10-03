@@ -6,7 +6,7 @@ An AI driving coach built on the **STMicroelectronics SensorTile.box**. A dash-m
 
 Track: **Applied AI Hardware+**. Collect, analyze and act on real sensor data; detect patterns/anomalies; deploy ML to edge/IoT devices.
 
-> Status: initial Expo mobile scaffold and BLE/GATT diagnostic are implemented; the STEVAL-MKBOXPRO v3.4.0 protocol profile is not yet decoded.
+> Status: the Expo mobile scaffold, BLE/GATT diagnostic, and a mock-data UI flow for home, active drive, replay, and trip summary are implemented. The driving screens are ready to be connected to live session state; the STEVAL-MKBOXPRO v3.4.0 protocol profile is not yet decoded.
 
 ---
 
@@ -267,8 +267,9 @@ This repository contains one Expo React Native mobile application, so the Expo p
 car-assistant-wolfhacks/
 ├── app/                         # Expo Router routes only
 │   ├── _layout.tsx
-│   ├── index.tsx                # Landing and device connection
-│   ├── drive.tsx                # Active driving screen
+│   ├── index.tsx                # Home, drive start and replay entry
+│   ├── drive.tsx                # Active driving screen (currently mock data)
+│   ├── diagnostics.tsx          # BLE/GATT developer diagnostics
 │   ├── settings.tsx
 │   └── trips/
 │       └── [id].tsx             # Trip report
@@ -405,7 +406,7 @@ Steps 1 to 6 are the product and must work with no cloud. Steps 7 to 9 add to it
 
 ## 14. Tech summary
 
-React Native (Expo dev build) · TypeScript · `react-native-ble-plx` · `onnxruntime-react-native` · SQLite · Python (FastAPI cloud service; NumPy and scikit-learn for training) · Databricks (Delta, notebooks, dashboards) · OpenStreetMap Overpass · ElevenLabs · Gemini Live API + Gemini API · STMicroelectronics SensorTile.box
+React Native (Expo dev build) · React Native Paper · TypeScript · `react-native-ble-plx` · `onnxruntime-react-native` · SQLite · Python (FastAPI cloud service; NumPy and scikit-learn for training) · Databricks (Delta, notebooks, dashboards) · OpenStreetMap Overpass · ElevenLabs · Gemini Live API + Gemini API · STMicroelectronics SensorTile.box
 
 ---
 
