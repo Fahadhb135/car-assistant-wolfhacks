@@ -261,18 +261,95 @@ Driver ids are anonymous. Upload is opt-in, wifi-only by default, and queued wit
 
 ## 10. Repo layout (planned)
 
+One monorepo. Each top-level folder has one owner (see [Section 14](#14-team-split-3-people)) and its own README. Folders talk to each other only through the contracts in `contracts/`, so nobody has to read another person's code to integrate.
+
 ```
 car-assistant-wolfhacks/
-├── app/               # React Native (Expo dev build) app: the whole real-time path
+├── README.md                    # this design doc
+├── .env.example                 # every key/URL needed, no secrets (real .env is gitignored)
+├── .gitignore
+│
+├── contracts/                   # SHARED: the single source of truth for interfaces   [All]
+│   ├── types.ts                 #   Sample, GpsFix, DriveEvent, TripUpload
+│   ├── trip.schema.json         #   cloud upload schema (validated on both sides)
+│   ├── events.md                #   event names, severities, spoken phrases
+│   └── test-vectors/            #   shared inputs/outputs: Python and TS features must match
+│
+├── app/                         # React Native (Expo dev build): the whole real-time path   [A, with B and C modules]
+│   ├── app.json  package.json  tsconfig.json
+│   ├── assets/
+│   │   ├── audio/               #   pre-generated alert phrases (ElevenLabs) [C]
+│   │   ├── models/              #   bundled default ONNX model + version file [B]
+│   │   └── demo/                #   bundled demo route + replay drive [A, B]
 │   └── src/
-│       ├── ble/  pipeline/  detectors/  location/  voice/  events/  storage/  sync/  ui/
-├── cloud/             # Python FastAPI service: trip ingest, Gemini analysis, token minting, model serving
-├── databricks/        # notebooks and jobs: Delta table schemas, trend analysis, retraining, ONNX export
-├── ml/                # Python: shared feature code, first-model training, evaluation, test vectors
-├── data/              # recorded drives (sensor + GPS) for training and replay
-├── assets/audio/      # pre-generated alert phrases
-└── docs/
+│       ├── ble/                 #   SensorTile.box connection, packet parser, reconnect [A]
+│       ├── pipeline/            #   calibrate, window, feature extraction [A + B]
+│       ├── detectors/
+│       │   ├── crash/           #   threshold detector + "Are you OK?" flow [A]
+│       │   └── erratic/         #   on-device model runner, scoring, hysteresis [B]
+│       ├── location/            #   GPS, Overpass tile cache, stop-sign coach [B]
+│       ├── voice/               #   alert queue, ElevenLabs, device-TTS fallback, Gemini Live [C]
+│       ├── events/              #   in-app event bus [A]
+│       ├── storage/             #   SQLite trip store [A]
+│       ├── sync/                #   upload queue, model update + validation [A]
+│       ├── replay/              #   recorded-drive source (swaps in for BLE + GPS) [A]
+│       ├── recorder/            #   save raw sensor + GPS to files for training [A]
+│       ├── ui/                  #   screens: connect, drive, alerts, trip report, settings [A]
+│       └── config/              #   env, feature flags, thresholds [A]
+│
+├── ml/                          # Python: model work, offline only                       [B]
+│   ├── pyproject.toml  (or requirements.txt)
+│   ├── features/                #   feature extraction (mirrors app/src/pipeline)
+│   ├── training/                #   Isolation Forest baseline, optional autoencoder
+│   ├── evaluation/              #   held-out drives, false alarms/hour, staged-weave metrics
+│   ├── export/                  #   ONNX export + test-vector generation into contracts/
+│   ├── notebooks/               #   exploration
+│   └── tests/                   #   feature parity with contracts/test-vectors
+│
+├── data/                        # recorded drives                                        [A, B]
+│   ├── raw/                     #   gitignored if large; document where they live
+│   ├── processed/
+│   ├── demo/                    #   small replay drives committed for the demo
+│   └── README.md                #   file format, how to record, consent notes
+│
+├── cloud/                       # Python FastAPI service: the post-trip path             [C]
+│   ├── pyproject.toml  (or requirements.txt)
+│   ├── Dockerfile
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── routes/              #   trips, report, live_token, model, health
+│   │   ├── services/            #   gemini.py, databricks.py, model_registry.py
+│   │   └── schemas/             #   pydantic models generated from contracts/
+│   └── tests/
+│
+├── databricks/                  # notebooks and jobs                                     [C]
+│   ├── schema/                  #   Delta table definitions
+│   ├── notebooks/               #   ingest, trends, risky locations, dashboard queries
+│   ├── jobs/                    #   scheduled retraining + ONNX export
+│   └── README.md                #   workspace setup steps
+│
+├── tools/                       # small scripts: record/convert/replay helpers, audio generation [any]
+│   ├── generate_audio.py        #   builds app/assets/audio from contracts/events.md [C]
+│   └── convert_recording.py     #   raw recording → data/processed [A, B]
+│
+├── docs/
+│   ├── contracts.md             #   how to change a contract safely
+│   ├── ble-notes.md             #   SensorTile.box characteristic layout, sample rates [A]
+│   ├── model-card.md            #   what the model detects, data, metrics, limits [B]
+│   ├── demo-script.md           #   step-by-step demo + fallbacks [All]
+│   └── setup.md                 #   one-page setup for new teammates
+│
+└── .github/
+    └── workflows/               #   lint + tests for app, ml, cloud (optional)
 ```
+
+### Conventions
+- **Ownership:** letters in brackets match Person A/B/C in Section 14. Changes to someone else's folder go through a PR they review.
+- **Contracts first:** any change to `contracts/` updates the TypeScript types, the JSON schema and the test vectors in the same PR.
+- **No secrets in git:** keys go in `.env` (cloud) or app config (local). `.env.example` lists every variable.
+- **Large data stays out of git:** commit only small demo drives under `data/demo/`.
+- **Naming:** TypeScript files `camelCase.ts`, React components `PascalCase.tsx`, Python `snake_case.py`, one module per responsibility.
+- **One README per top-level folder** with what it is, how to run it, and who owns it.
 
 ---
 
