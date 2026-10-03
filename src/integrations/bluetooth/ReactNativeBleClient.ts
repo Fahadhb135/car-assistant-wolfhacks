@@ -6,7 +6,7 @@ import {
 import { PermissionsAndroid, Platform } from 'react-native';
 
 import type { BluetoothClient } from './BluetoothClient';
-import { base64ToBytes, bytesToHex } from './base64';
+import { base64ToBytes, bytesToBase64, bytesToHex } from './base64';
 import { asError } from './errors';
 import type {
   BluetoothDeviceSummary,
@@ -160,6 +160,23 @@ export class ReactNativeBleClient implements BluetoothClient {
     }
 
     return this.notificationSubscriptions.length;
+  }
+
+  async writeWithoutResponse(
+    serviceUuid: string,
+    characteristicUuid: string,
+    value: Uint8Array,
+  ): Promise<void> {
+    if (!this.connectedDevice) {
+      throw new Error('Connect to a Bluetooth device before writing.');
+    }
+
+    await this.manager.writeCharacteristicWithoutResponseForDevice(
+      this.connectedDevice.id,
+      serviceUuid,
+      characteristicUuid,
+      bytesToBase64(value),
+    );
   }
 
   async disconnect(): Promise<void> {

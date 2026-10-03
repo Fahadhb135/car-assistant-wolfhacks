@@ -13,16 +13,25 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   filterByProximity,
+  frameStPnplCommand,
   isStMicroelectronicsDevice,
   manufacturerDataHex,
+  parseRawStreamPacket,
   PROXIMITY_MIN_RSSI,
   ReactNativeBleClient,
+  ST_FEATURE_SERVICE_UUID,
+  ST_PNPL_CHARACTERISTIC_UUID,
+  ST_RAW_STREAM_CHARACTERISTIC_UUID,
+  startImuStreamCommands,
+  StPnplResponseAssembler,
+  stopImuStreamCommands,
   StreamMetrics,
   type BluetoothDeviceSummary,
   type ProximityFilter,
   type GattServiceSnapshot,
   type RawBlePacket,
 } from '@/integrations/bluetooth';
+import { base64ToBytes } from '@/integrations/bluetooth/base64';
 import type { StreamMetricsSnapshot } from '@/integrations/bluetooth/StreamMetrics';
 
 const EMPTY_METRICS: StreamMetricsSnapshot = {
@@ -32,6 +41,12 @@ const EMPTY_METRICS: StreamMetricsSnapshot = {
   largestInterarrivalGapMs: 0,
   monitoredCharacteristicCount: 0,
 };
+
+const PNPL_LOG_LIMIT = 20;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 const PROXIMITY_OPTIONS: readonly { value: ProximityFilter; label: string }[] = [
   { value: 'veryClose', label: 'Very close' },
@@ -43,6 +58,9 @@ export function BluetoothDiagnosticScreen() {
   const clientRef = useRef<ReactNativeBleClient | null>(null);
   const metricsRef = useRef(new StreamMetrics());
   const packetPreviewRef = useRef<RawBlePacket[]>([]);
+  const pnplAssemblerRef = useRef(new StPnplResponseAssembler());
+  const pnplLogRef = useRef<string[]>([]);
+  const sensorPacketCountsRef = useRef<Record<number, number>>({});
 
   const [status, setStatus] = useState('Ready to scan');
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +72,8 @@ export function BluetoothDiagnosticScreen() {
   const [busy, setBusy] = useState(false);
   const [proximity, setProximity] = useState<ProximityFilter>('nearby');
   const [stOnly, setStOnly] = useState(false);
+  const [pnplLog, setPnplLog] = useState<readonly string[]>([]);
+  const [sensorPacketCounts, setSensorPacketCounts] = useState<Record<number, number>>({});
 
   if (!clientRef.current && Platform.OS !== 'web') {
     clientRef.current = new ReactNativeBleClient();
@@ -63,6 +83,8 @@ export function BluetoothDiagnosticScreen() {
     const timer = setInterval(() => {
       setMetrics(metricsRef.current.snapshot());
       setPackets([...packetPreviewRef.current]);
+      setPnplLog([...pnplLogRef.current]);
+      setSensorPacketCounts({ ...sensorPacketCountsRef.current });
     }, 1_000);
 
     return () => {
@@ -146,6 +168,44 @@ export function BluetoothDiagnosticScreen() {
     }
   }
 
+  function logPnpl(line: string) {
+    pnplLogRef.current = [...pnplLogRef.current, line].slice(-PNPL_LOG_LIMIT);
+  }
+
+  async function sendPnplCommands(commands: readonly string[], label: string) {
+    if (!clientRef.current) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setStatus(`${label}…`);
+
+    try {
+      for (const command of commands) {
+        console.info('[BLE PnPL command]', command);
+        logPnpl(`→ ${command}`);
+        for (const packet of frameStPnplCommand(command)) {
+          await clientRef.current.writeWithoutResponse(
+            ST_FEATURE_SERVICE_UUID,
+            ST_PNPL_CHARACTERISTIC_UUID,
+            packet,
+          );
+          // Write-without-response has no flow control; pace the chunks.
+          await delay(20);
+        }
+        // Give the board time to apply each setting and reply.
+        await delay(300);
+      }
+      setStatus(`${label}: sent ${commands.length} commands`);
+    } catch (commandError) {
+      setError(commandError instanceof Error ? commandError.message : String(commandError));
+      setStatus(`${label} failed`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function monitorNotifications() {
     if (!clientRef.current) {
       return;
@@ -155,12 +215,27 @@ export function BluetoothDiagnosticScreen() {
     setError(null);
     packetPreviewRef.current = [];
     setPackets([]);
+    pnplAssemblerRef.current = new StPnplResponseAssembler();
+    sensorPacketCountsRef.current = {};
 
     try {
       metricsRef.current.reset();
       const monitoredCount = await clientRef.current.monitorNotifiableCharacteristics(
         (packet) => {
           metricsRef.current.record(packet);
+          if (packet.characteristicUuid === ST_PNPL_CHARACTERISTIC_UUID) {
+            const response = pnplAssemblerRef.current.push(base64ToBytes(packet.valueBase64));
+            if (response) {
+              console.info('[BLE PnPL response]', response);
+              logPnpl(`← ${response}`);
+            }
+          } else if (packet.characteristicUuid === ST_RAW_STREAM_CHARACTERISTIC_UUID) {
+            const parsed = parseRawStreamPacket(base64ToBytes(packet.valueBase64));
+            if (parsed) {
+              const counts = sensorPacketCountsRef.current;
+              counts[parsed.sensorId] = (counts[parsed.sensorId] ?? 0) + 1;
+            }
+          }
           if (packetPreviewRef.current.length < 20) {
             packetPreviewRef.current.push(packet);
             console.info('[BLE packet]', JSON.stringify(packet));
@@ -274,6 +349,33 @@ export function BluetoothDiagnosticScreen() {
               onPress={monitorNotifications}
               disabled={busy || services.length === 0}
             />
+
+            <Text style={styles.sectionHeading}>ST DATALOG2 IMU stream</Text>
+            <Text>
+              Start monitoring first. Start sends PnPL commands that enable the accelerometer and
+              gyroscope at 120 Hz and start a log (the board needs an SD card).
+            </Text>
+            <Button
+              title="Start IMU stream"
+              onPress={() => void sendPnplCommands(startImuStreamCommands(), 'Starting IMU stream')}
+              disabled={busy || metrics.monitoredCharacteristicCount === 0}
+            />
+            <Button
+              title="Stop IMU stream"
+              onPress={() => void sendPnplCommands(stopImuStreamCommands(), 'Stopping IMU stream')}
+              disabled={busy || metrics.monitoredCharacteristicCount === 0}
+            />
+            <Text>
+              Stream packets by sensor ID:{' '}
+              {Object.entries(sensorPacketCounts)
+                .map(([sensorId, count]) => `#${sensorId}: ${count}`)
+                .join(', ') || 'none yet'}
+            </Text>
+            {pnplLog.map((line, index) => (
+              <Text selectable key={`${index}-${line}`} style={styles.packet}>
+                {line}
+              </Text>
+            ))}
 
             <Text style={styles.sectionHeading}>Stream metrics</Text>
             <Text>Characteristics monitored: {metrics.monitoredCharacteristicCount}</Text>

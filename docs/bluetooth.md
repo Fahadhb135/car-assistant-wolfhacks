@@ -1,10 +1,10 @@
 # STEVAL-MKBOXPRO Bluetooth diagnostics
 
-The first mobile milestone discovers the GATT contract exposed by the STEVAL-MKBOXPRO factory firmware v3.4.0. The app intentionally does not hardcode service or characteristic UUIDs yet.
+The first mobile milestone discovers the GATT contract exposed by the STEVAL-MKBOXPRO factory firmware v3.4.0. The board advertises as `HSD2v34`, ST's DATALOG2 (High Speed Datalog 2) firmware v3.4. Generic monitoring does not hardcode UUIDs; the **Start IMU stream** button uses the DATALOG2 PnPL and raw-stream characteristics documented in [steval-mkboxpro-results.md](steval-mkboxpro-results.md).
 
 ## Prerequisites
 
-- Physical STEVAL-MKBOXPRO updated to factory firmware v3.4.0
+- Physical STEVAL-MKBOXPRO updated to factory firmware v3.4.0 (DATALOG2), with an SD card inserted
 - Physical iPhone
 - Mac with Xcode and signing configured
 - Node.js version supported by the installed Expo SDK
@@ -39,7 +39,9 @@ The computer running Metro and the iPhone should be on the same network. Do not 
 4. Wait for service discovery.
 5. Copy the `[BLE GATT snapshot]` entry from the Metro or Xcode console.
 6. Tap **Monitor notifiable characteristics**.
-7. Move the board and look for `[BLE packet]` entries and increasing stream metrics.
+7. Tap **Start IMU stream**. It sends the DATALOG2 PnPL commands that enable the accelerometer and gyroscope at 120 Hz and start a log. Each command and the board's reply appear on screen and in Metro as `[BLE PnPL command]` / `[BLE PnPL response]`.
+8. Move the board and look for increasing **Stream packets by sensor ID**, `[BLE packet]` entries and stream metrics.
+9. Tap **Stop IMU stream** when done. This also stops the SD-card log.
 
 Only the first 20 packet payloads are retained and logged. Stream counters update once per second so sensor notifications do not cause a React render for every packet.
 

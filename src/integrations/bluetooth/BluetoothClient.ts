@@ -16,6 +16,7 @@ export interface BluetoothClient {
     onPacket: RawPacketListener,
     onError: BluetoothErrorListener,
   ): Promise<number>;
+  writeWithoutResponse(serviceUuid: string, characteristicUuid: string, value: Uint8Array): Promise<void>;
   disconnect(): Promise<void>;
   destroy(): Promise<void>;
 }
