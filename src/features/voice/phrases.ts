@@ -14,6 +14,7 @@ export const POLICIES: Record<AlertKind, AlertPolicy> = {
   rolling_stop: { priority: 60, ttlMs: 5_000, cooldownMs: 10_000 },
   erratic_driving: { priority: 50, ttlMs: 5_000, cooldownMs: 20_000 },
   stop_ok: { priority: 20, ttlMs: 4_000, cooldownMs: 15_000 },
+  chat_reply: { priority: 30, ttlMs: 15_000, cooldownMs: 0 },
   coaching_tip: { priority: 10, ttlMs: 30_000, cooldownMs: 60_000 },
 };
 
@@ -65,6 +66,19 @@ export function coachingTipAlert(id: string, text: string, now: number): Alert {
   return {
     id,
     kind: 'coaching_tip',
+    priority: policy.priority,
+    utterance: { text },
+    createdAt: now,
+    ttlMs: policy.ttlMs,
+  };
+}
+
+/** Spoken answer to a driver's question. Outranks tips, never outranks a safety alert. */
+export function chatReplyAlert(id: string, text: string, now: number): Alert {
+  const policy = POLICIES.chat_reply;
+  return {
+    id,
+    kind: 'chat_reply',
     priority: policy.priority,
     utterance: { text },
     createdAt: now,

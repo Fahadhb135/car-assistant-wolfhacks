@@ -1,6 +1,6 @@
 import type { DriveEvent } from '../../core/events/types';
 import { AlertQueue } from './AlertQueue';
-import { alertFromEvent, coachingTipAlert } from './phrases';
+import { alertFromEvent, chatReplyAlert, coachingTipAlert } from './phrases';
 import type { Alert, LiveControl, Speaker } from './types';
 
 export type VoiceDeps = {
@@ -32,6 +32,12 @@ export class VoiceCoordinator {
   /** Coaching tips only play when nothing else is speaking and Live is idle. */
   suggestTip(id: string, text: string): void {
     this.queue.enqueue(coachingTipAlert(id, text, this.now()), this.now());
+    this.pump();
+  }
+
+  /** Speak the coach's answer to a driver question. Safety alerts still preempt it. */
+  speakReply(id: string, text: string): void {
+    this.queue.enqueue(chatReplyAlert(id, text, this.now()), this.now());
     this.pump();
   }
 

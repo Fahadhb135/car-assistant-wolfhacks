@@ -6,6 +6,7 @@ from typing import Callable, Optional
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 
+from .chat import ChatFn, ChatRequest, ChatResponse, answer, chat_from_env
 from .db import TripStore
 from .model_registry import PATTERN, latest_model
 from .reports import GeminiFn, gemini_from_env, make_report
@@ -42,6 +43,7 @@ def create_app(
     models_dir: Optional[Path] = None,
     gemini: Optional[GeminiFn] = None,
     live_token: Optional[LiveTokenFn] = None,
+    chat: Optional[ChatFn] = None,
 ) -> FastAPI:
     app = FastAPI(title="Car Assistant cloud")
     store = TripStore(db_path or os.environ.get("TRIPS_DB", "cloud/data/trips.db"))
@@ -50,6 +52,8 @@ def create_app(
     key = os.environ.get("GEMINI_API_KEY")
     if gemini is None and key:
         gemini = gemini_from_env(key, os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"))
+    if chat is None and key:
+        chat = chat_from_env(key, os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"))
     if live_token is None and key:
         live_token = live_token_from_env(key)
 
@@ -79,6 +83,10 @@ def create_app(
             report = make_report(trip, gemini)
             store.save_report(trip_id, report)
         return report
+
+    @app.post("/chat", response_model=ChatResponse)
+    def post_chat(req: ChatRequest) -> ChatResponse:
+        return ChatResponse(reply=answer(req, chat))
 
     @app.post("/live-token")
     def post_live_token() -> dict:

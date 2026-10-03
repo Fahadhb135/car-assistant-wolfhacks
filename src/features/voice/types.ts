@@ -5,6 +5,7 @@ export type AlertKind =
   | 'rolling_stop'
   | 'erratic_driving'
   | 'stop_ok'
+  | 'chat_reply'
   | 'coaching_tip';
 
 export type Utterance = {

@@ -88,3 +88,27 @@ def test_model_latest_picks_highest_version_with_checksum(make, tmp_path):
     assert len(info["sha256"]) == 64
     assert c.get("/model/files/model-v2.onnx").content == b"bb"
     assert c.get("/model/files/..%2Fsecret").status_code == 404
+
+
+def test_chat_uses_gemini_with_trip_context(make):
+    seen = {}
+
+    def fake(system, message):
+        seen["system"], seen["message"] = system, message
+        return " Pretty smooth. "
+
+    c = make(chat=fake)
+    r = c.post("/chat", json={"message": "how was that turn?", "recentEvents": ["rolled a stop"], "smoothness": 82.4})
+    assert r.json() == {"reply": "Pretty smooth."}
+    assert "never decide anything about safety".replace("never decide", "never decide") in seen["system"]
+    assert "rolled a stop" in seen["system"] and "82/100" in seen["system"]
+
+
+def test_chat_falls_back_and_validates(make):
+    assert "can't answer" in make().post("/chat", json={"message": "hi"}).json()["reply"]
+
+    def boom(s, m):
+        raise RuntimeError("down")
+
+    assert "can't answer" in make(chat=boom).post("/chat", json={"message": "hi"}).json()["reply"]
+    assert make().post("/chat", json={"message": ""}).status_code == 422

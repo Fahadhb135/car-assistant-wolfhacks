@@ -78,3 +78,14 @@ describe('VoiceCoordinator', () => {
     expect(errors).toHaveLength(2);
   });
 });
+
+describe('chat replies', () => {
+  it('a chat reply is preempted by a safety alert and outranks tips', async () => {
+    const { speaker, voice } = setup();
+    voice.speakReply('c1', 'Pretty smooth.');
+    await flush();
+    voice.handleEvent(ev({ kind: 'stop_sign_ahead', severity: 'info', distanceM: 30 }, 0));
+    await flush();
+    expect(speaker.spoken).toEqual(['Pretty smooth.', PHRASES.stop_sign_ahead]);
+  });
+});
