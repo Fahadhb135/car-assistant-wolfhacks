@@ -47,6 +47,8 @@ Monitoring every notifiable characteristic is a discovery tool, not the final da
 
 ## Data to return to the team
 
+Results so far are recorded in [steval-mkboxpro-results.md](steval-mkboxpro-results.md).
+
 - Advertised device name
 - GATT snapshot JSON
 - UUIDs whose counters change while the board moves
