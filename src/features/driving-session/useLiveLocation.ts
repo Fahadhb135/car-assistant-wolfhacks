@@ -1,9 +1,8 @@
 import * as Location from 'expo-location';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import type { DriveEvent } from '../../core/events/types';
-import type { VoiceCoordinator } from '../voice/VoiceCoordinator';
 import { createLiveLocationSession } from './createLiveLocationSession';
+import type { DriveEventSink } from './DriveEventGate';
 import { toGpsFix } from './gpsFix';
 
 const MAP_ERROR_VISIBLE_MS = 60_000;
@@ -20,8 +19,7 @@ export type LiveLocationStatus = 'idle' | 'requesting' | 'denied' | 'waiting' | 
  */
 export function useLiveLocation(
   enabled: boolean,
-  voice: Pick<VoiceCoordinator, 'handleEvent'>,
-  onEvent: (event: DriveEvent) => void,
+  eventSink: DriveEventSink,
 ): Readonly<{
   status: LiveLocationStatus;
   mapError: string | null;
@@ -37,10 +35,6 @@ export function useLiveLocation(
   const [limitMps, setLimitMps] = useState<number | null>(null);
   const [toleranceMps, setToleranceMps] = useState(0);
   const [mapError, setMapError] = useState<string | null>(null);
-  // Keep the latest callback without restarting GPS when the parent re-renders.
-  const onEventRef = useRef(onEvent);
-  onEventRef.current = onEvent;
-
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
@@ -52,8 +46,7 @@ export function useLiveLocation(
     setSpeedMps(null);
     setLimitMps(null);
     const { session, speeding } = createLiveLocationSession(
-      voice,
-      (event) => !cancelled && onEventRef.current(event),
+      eventSink,
       (err) => {
         // The drive carries on with whatever map data is already loaded.
         console.warn('[live location] map tiles:', err instanceof Error ? err.message : String(err));
@@ -112,7 +105,7 @@ export function useLiveLocation(
       subscription?.remove();
       if (mapErrorTimer) clearTimeout(mapErrorTimer);
     };
-  }, [enabled, voice]);
+  }, [enabled, eventSink]);
 
   return { status, mapError, speedMps, limitMps, toleranceMps };
 }

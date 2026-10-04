@@ -42,11 +42,17 @@ export class AlertQueue {
     this.items = this.items.filter((a) => (a.kind === kind ? (release(a), false) : true));
   }
 
+  /** Drop and release all queued work below a safety alert's priority. */
+  removeBelowPriority(priority: number): void {
+    this.items = this.items.filter((alert) => (alert.priority < priority ? (release(alert), false) : true));
+  }
+
   size(): number {
     return this.items.length;
   }
 
   clear(): void {
+    for (const alert of this.items) release(alert);
     this.items = [];
   }
 

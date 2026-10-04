@@ -63,7 +63,7 @@ export default function DriveRoute() {
   );
   const replay = useReplayDrive(replayMode, voice);
   const live = useLiveImuDrive(!replayMode, deviceId, voice);
-  const location = useLiveLocation(!replayMode, voice, live.recordEvent);
+  const location = useLiveLocation(!replayMode, live.eventSink);
   const getEvents = useCallback(
     () => (replayMode ? replay.eventsRef.current : live.eventsRef.current),
     [live.eventsRef, replay.eventsRef, replayMode],

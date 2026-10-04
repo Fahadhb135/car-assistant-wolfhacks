@@ -5,6 +5,7 @@ export const DEFAULT_IMU_PIPELINE_CONFIG: ImuPipelineConfig = Object.freeze({
     maximumAbsoluteAccelerationG: 32,
     maximumAbsoluteAngularVelocityDps: 4_000,
   }),
+  nonCrashMotionCooldownMs: 60_000,
   bufferRetentionMs: 10_000,
   maximumBufferedSamples: 2_000,
   windows: Object.freeze({
@@ -14,48 +15,48 @@ export const DEFAULT_IMU_PIPELINE_CONFIG: ImuPipelineConfig = Object.freeze({
     maximumBufferedSamples: 2_000,
   }),
   crash: Object.freeze({
-    triggerAccelerationG: 3.5,
+    triggerAccelerationG: 4.5,
     releaseAccelerationG: 1.5,
-    minimumDurationMs: 60,
-    minimumImpulseGSeconds: 0.12,
-    minimumAngularVelocityDps: 20,
+    minimumDurationMs: 80,
+    minimumImpulseGSeconds: 0.16,
+    minimumAngularVelocityDps: 35,
     maximumContinuityGapMs: 100,
-    cooldownMs: 3_000,
+    cooldownMs: 10_000,
   }),
   swerve: Object.freeze({
     rotationAxis: 'z',
-    directionDeadbandDps: 10,
-    minimumDirectionChanges: 3,
-    minimumRotationStandardDeviationDps: 20,
-    minimumAccelerationStandardDeviationG: 0.08,
-    maximumMissingSampleRatio: 0.2,
-    minimumSamples: 20,
+    directionDeadbandDps: 15,
+    minimumDirectionChanges: 4,
+    minimumRotationStandardDeviationDps: 35,
+    minimumAccelerationStandardDeviationG: 0.18,
+    maximumMissingSampleRatio: 0.15,
+    minimumSamples: 40,
     releaseDirectionChanges: 1,
-    cooldownMs: 3_000,
+    cooldownMs: 10_000,
   }),
   behaviors: Object.freeze({
     maximumContinuityGapMs: 100,
     hardBraking: Object.freeze({
-      triggerLongitudinalG: 0.3,
-      releaseLongitudinalG: 0.15,
-      minimumDurationMs: 250,
-      minimumJerkGps: 0.5,
-      cooldownMs: 5_000,
+      triggerLongitudinalG: 0.45,
+      releaseLongitudinalG: 0.2,
+      minimumDurationMs: 400,
+      minimumJerkGps: 0.75,
+      cooldownMs: 10_000,
     }),
     rapidAcceleration: Object.freeze({
-      triggerLongitudinalG: 0.25,
-      releaseLongitudinalG: 0.12,
-      minimumDurationMs: 350,
-      minimumJerkGps: 0.4,
-      cooldownMs: 5_000,
+      triggerLongitudinalG: 0.4,
+      releaseLongitudinalG: 0.18,
+      minimumDurationMs: 500,
+      minimumJerkGps: 0.6,
+      cooldownMs: 10_000,
     }),
     harshCornering: Object.freeze({
-      triggerLateralG: 0.35,
-      releaseLateralG: 0.18,
-      minimumYawRateDps: 18,
-      releaseYawRateDps: 8,
-      minimumDurationMs: 300,
-      cooldownMs: 5_000,
+      triggerLateralG: 0.5,
+      releaseLateralG: 0.22,
+      minimumYawRateDps: 28,
+      releaseYawRateDps: 10,
+      minimumDurationMs: 450,
+      cooldownMs: 10_000,
     }),
   }),
 });
@@ -67,6 +68,7 @@ function positive(value: number, name: string): void {
 export function resolvePipelineConfig(partial: PartialImuPipelineConfig = {}): ImuPipelineConfig {
   const config: ImuPipelineConfig = {
     validation: { ...DEFAULT_IMU_PIPELINE_CONFIG.validation, ...partial.validation },
+    nonCrashMotionCooldownMs: partial.nonCrashMotionCooldownMs ?? DEFAULT_IMU_PIPELINE_CONFIG.nonCrashMotionCooldownMs,
     bufferRetentionMs: partial.bufferRetentionMs ?? DEFAULT_IMU_PIPELINE_CONFIG.bufferRetentionMs,
     maximumBufferedSamples: partial.maximumBufferedSamples ?? DEFAULT_IMU_PIPELINE_CONFIG.maximumBufferedSamples,
     windows: { ...DEFAULT_IMU_PIPELINE_CONFIG.windows, ...partial.windows },
@@ -82,6 +84,9 @@ export function resolvePipelineConfig(partial: PartialImuPipelineConfig = {}): I
   };
 
   positive(config.validation.maximumAbsoluteAccelerationG, 'maximumAbsoluteAccelerationG');
+  if (config.nonCrashMotionCooldownMs < 0 || !Number.isFinite(config.nonCrashMotionCooldownMs)) {
+    throw new Error('nonCrashMotionCooldownMs must be finite and non-negative');
+  }
   positive(config.validation.maximumAbsoluteAngularVelocityDps, 'maximumAbsoluteAngularVelocityDps');
   positive(config.bufferRetentionMs, 'bufferRetentionMs');
   positive(config.maximumBufferedSamples, 'maximumBufferedSamples');

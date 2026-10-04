@@ -1,4 +1,3 @@
-import type { DriveEvent } from '../../core/events/types';
 import { LocationCoach } from '../../core/location/coach';
 import { RegionPrefetcher } from '../../core/location/regionPrefetch';
 import { SpeedingCoach } from '../../core/location/speeding';
@@ -8,8 +7,8 @@ import { OverpassClient } from '../../integrations/location/overpassClient';
 import { MemoryTileStore, TILE_SCHEMA, TileCache, type TileData } from '../../integrations/location/tileCache';
 import prefetchedTiles from '../../../fixtures/tiles/prefetched.json';
 import tileFixture from '../../../fixtures/tiles/demo-route.json';
-import type { VoiceCoordinator } from '../voice/VoiceCoordinator';
 import { DriveSession } from './DriveSession';
+import type { DriveEventSink } from './DriveEventGate';
 
 /**
  * Tiles saved by `scripts/prefetch-tiles.mts`. They go into the store as downloaded tiles, so the
@@ -32,8 +31,7 @@ function prefetchedStore(): MemoryTileStore {
  * Overpass is unreachable. Newly downloaded tiles are kept in memory for the app session.
  */
 export function createLiveLocationSession(
-  voice: Pick<VoiceCoordinator, 'handleEvent'>,
-  onEvent: (event: DriveEvent) => void,
+  eventSink: DriveEventSink,
   onError: (err: unknown) => void,
 ): { session: DriveSession; speeding: SpeedingCoach } {
   const speeding = new SpeedingCoach();
@@ -53,8 +51,7 @@ export function createLiveLocationSession(
         `[live location] map area: ${region.keys.length} tiles around ${region.center.lat.toFixed(5)},${region.center.lon.toFixed(5)}`,
       ),
     hotspots: null,
-    voice,
-    onEvent,
+    eventSink,
     onError,
   });
   return { session, speeding };

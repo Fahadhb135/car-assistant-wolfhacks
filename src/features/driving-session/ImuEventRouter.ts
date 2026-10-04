@@ -5,16 +5,15 @@ import {
   type DriveEvent,
   type ImuEvent,
 } from '../../core/events/types';
-import type { VoiceCoordinator } from '../voice/VoiceCoordinator';
+import type { DriveEventSink } from './DriveEventGate';
 
 export type ImuEventRouterOptions = Readonly<{
-  voice: Pick<VoiceCoordinator, 'handleEvent'>;
-  onEvent?: (event: DriveEvent) => void;
+  eventSink: DriveEventSink;
   nextId?: () => string;
   wallClockNow?: () => number;
 }>;
 
-/** Routes detector candidates onto the same event path used by location coaching and replay. */
+/** Converts detector candidates and sends them through the drive's single shared event gate. */
 export class ImuEventRouter {
   private readonly nextId: () => string;
   private readonly wallClockNow: () => number;
@@ -25,7 +24,7 @@ export class ImuEventRouter {
     this.wallClockNow = options.wallClockNow ?? Date.now;
   }
 
-  route(candidate: ImuEvent): DriveEvent {
+  route(candidate: ImuEvent): DriveEvent | undefined {
     // Freeze the monotonic-to-epoch relationship on the first event in this drive. Computing it for
     // every event would introduce wall-clock jumps into otherwise monotonic sensor timestamps.
     this.epochOffsetMs ??= this.wallClockNow() - candidate.occurredAtMs;
@@ -33,8 +32,6 @@ export class ImuEventRouter {
       imuEventToDriveEventInput(candidate, this.epochOffsetMs),
       this.nextId,
     );
-    this.options.onEvent?.(event);
-    this.options.voice.handleEvent(event);
-    return event;
+    return this.options.eventSink.route(event) ? event : undefined;
   }
 }

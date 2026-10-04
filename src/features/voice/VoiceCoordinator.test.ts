@@ -45,6 +45,25 @@ describe('VoiceCoordinator', () => {
     expect(live.calls).toEqual(['pause', 'resume']);
   });
 
+  it('speaks a possible-crash check once and discards queued lower-priority work', async () => {
+    const { speaker, voice } = setup();
+    voice.handleEvent(ev({ kind: 'stop_sign_ahead', severity: 'info', distanceM: 40 }, 0));
+    await flush();
+    voice.speakReply('queued-chat', 'This must not play.');
+    voice.suggestTip('queued-tip', 'Nor this.');
+    const possibleCrash = { kind: 'crash' as const, severity: 'critical' as const, confirmed: false };
+    voice.handleEvent(ev(possibleCrash, 0));
+    voice.handleEvent(ev(possibleCrash, 0));
+    await flush();
+    expect(speaker.spoken).toEqual([PHRASES.stop_sign_ahead, PHRASES.crash_check]);
+    speaker.complete();
+    await flush();
+    expect(speaker.spoken).toEqual([PHRASES.stop_sign_ahead, PHRASES.crash_check]);
+    voice.speakReply('passenger-request', 'I am okay.');
+    await flush();
+    expect(speaker.spoken).toEqual([PHRASES.stop_sign_ahead, PHRASES.crash_check, 'I am okay.']);
+  });
+
   it('ends Live on a crash and never resumes it', async () => {
     const { speaker, live, voice } = setup();
     live.active = true;
