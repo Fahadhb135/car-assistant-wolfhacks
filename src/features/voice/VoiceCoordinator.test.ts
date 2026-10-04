@@ -22,6 +22,24 @@ describe('VoiceCoordinator', () => {
     expect(speaker.spoken).toEqual([PHRASES.erratic_driving, PHRASES.crash_check]);
   });
 
+  it('a clip and the Gemini remark wait for each other instead of cutting each other off', async () => {
+    const { speaker, voice } = setup();
+    voice.handleEvent(ev({ kind: 'erratic_driving', severity: 'warn', score: 1 }, 0));
+    await flush();
+    voice.speakCoach('coach-1', 'Keep your hands steady for the next block.');
+    await flush();
+    expect(speaker.spoken).toEqual([PHRASES.erratic_driving]);
+    speaker.complete();
+    await flush();
+    // The remark plays next, and a non-urgent clip arriving now waits for it.
+    voice.handleEvent(ev({ kind: 'hard_braking', severity: 'warn', score: 1, evidence: {} }, 0));
+    await flush();
+    expect(speaker.spoken).toEqual([PHRASES.erratic_driving, 'Keep your hands steady for the next block.']);
+    speaker.complete();
+    await flush();
+    expect(speaker.spoken).toHaveLength(3);
+  });
+
   it('does not interrupt for an equal or lower priority alert, and plays it after', async () => {
     const { speaker, voice } = setup();
     voice.handleEvent(ev({ kind: 'stop_sign_ahead', severity: 'info', distanceM: 40 }, 0));

@@ -3,6 +3,9 @@ import { AlertQueue } from './AlertQueue';
 import { alertFromEvent, chatReplyAlert, chatReplyStreamAlert, coachingTipAlert, liveCoachAlert } from './phrases';
 import type { Alert, LiveControl, Speaker, SpokenStream } from './types';
 
+/** Alerts at or above this (crash check, stop signs, speeding, highway merges) may interrupt speech. */
+export const PREEMPT_PRIORITY = 55;
+
 export type VoiceDeps = {
   speaker: Speaker;
   live: LiveControl;
@@ -92,7 +95,9 @@ export class VoiceCoordinator {
 
     if (this.current) {
       const top = this.queue.peek(now, { allowTips });
-      if (top && top.priority > this.current.alert.priority) {
+      // Only an urgent safety alert cuts a line off; everything else waits for it to finish, so a
+      // clip and the Gemini remark that follows it play one after the other instead of colliding.
+      if (top && top.priority > this.current.alert.priority && top.priority >= PREEMPT_PRIORITY) {
         // Settling the speaker re-enters pump() from play().
         this.current.ctrl.abort();
       }
