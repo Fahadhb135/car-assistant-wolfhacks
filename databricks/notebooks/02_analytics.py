@@ -84,3 +84,21 @@ context = {"generatedAt": int(time.time() * 1000), "drivers": driver_stats(trip_
 out = f"/Volumes/{CAT}/{SCH}/{VOL}/publish/coaching_context.json"
 dbutils.fs.put(out, json.dumps(context, default=float), True)
 print(f"published coaching context for {len(context['drivers'])} drivers, {len(risky)} risky spots to {out}")
+
+# COMMAND ----------
+# Publish the parent dashboard: per driver, one summary row per trip plus every speeding alert. The
+# cloud service reads publish/parent_dashboard.json (cached, POST /admin/parent/refresh to reload now),
+# works out the 7d / 30d / all ranges per request, and adds any trips uploaded since this ran from its
+# own database. The aggregation lives in cloud/app/parent.py (unit-tested, shared with the service's
+# local fallback), so Databricks and the fallback cannot disagree.
+from app.parent import driver_history
+
+parent_trips = [r.asDict() for r in spark.table(f"{CAT}.{SCH}.trips")
+                .select("tripId", "driverId", "startMs", "endMs", "durationS", "smoothness",
+                        "stopCompliance", "distanceM", "hadCrash").collect()]
+parent_events = [r.asDict() for r in spark.table(f"{CAT}.{SCH}.events")
+                 .select("tripId", "driverId", "tMs", "kind", "lat", "lon", "speedMps", "limitMps", "road").collect()]
+dashboard = {"generatedAt": int(time.time() * 1000), "drivers": driver_history(parent_trips, parent_events)}
+out = f"/Volumes/{CAT}/{SCH}/{VOL}/publish/parent_dashboard.json"
+dbutils.fs.put(out, json.dumps(dashboard, default=float), True)
+print(f"published parent dashboard for {len(dashboard['drivers'])} drivers to {out}")

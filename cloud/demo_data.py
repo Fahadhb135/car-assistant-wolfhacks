@@ -44,8 +44,14 @@ def _features(rng: random.Random, roughness: float) -> list[list[float]]:
     return rows
 
 
-def _trip(trip_id, driver, start_ms, outcomes, rng, smoothness, roughness, erratic=0, with_features=True):
+ROADS = ("Glenwood Ave", "Hillsborough St", "Western Blvd")
+LIMITS_MPS = (13.4112, 17.8816, 20.1168)  # 30, 40 and 45 mph
+
+
+def _trip(trip_id, driver, start_ms, outcomes, rng, smoothness, roughness, erratic=0, with_features=True, speeding=0):
     events, n = [], 0
+    # Speeding and distance use their own generator, so adding them left every other demo number unchanged.
+    extra = random.Random(f"{trip_id}-parent")
     for i, (stop, kind) in enumerate(outcomes):
         lat, lon = _jitter(rng, *STOPS[stop])
         n += 1
@@ -53,6 +59,15 @@ def _trip(trip_id, driver, start_ms, outcomes, rng, smoothness, roughness, errat
     for j in range(erratic):
         n += 1
         events.append({"eventId": f"e{n}", "t": start_ms + (3 + j * 5) * 60_000 + 30_000, "kind": "erratic_driving", "score": round(rng.uniform(0.6, 0.9), 2)})
+    for j in range(speeding):
+        n += 1
+        limit = extra.choice(LIMITS_MPS)
+        lat, lon = _jitter(extra, *STOPS["A"], meters=60.0)
+        events.append({
+            "eventId": f"e{n}", "t": start_ms + (6 + j * 4) * 60_000, "kind": "speeding",
+            "speedMps": round(limit + extra.uniform(2.3, 6.7), 2), "limitMps": limit,
+            "road": extra.choice(ROADS), "lat": lat, "lon": lon,
+        })
     events.sort(key=lambda e: e["t"])
     ok = sum(1 for _, k in outcomes if k == "stop_ok")
     trip = {
@@ -60,7 +75,8 @@ def _trip(trip_id, driver, start_ms, outcomes, rng, smoothness, roughness, errat
         "driverId": driver,
         "start": start_ms,
         "end": start_ms + 22 * 60_000,
-        "scores": {"smoothness": round(smoothness, 1), "stopCompliance": round(ok / len(outcomes), 2)},
+        "scores": {"smoothness": round(smoothness, 1), "stopCompliance": round(ok / len(outcomes), 2),
+                   "distanceM": round(extra.uniform(6_500, 14_000))},
         "events": events,
     }
     if with_features:
@@ -90,6 +106,7 @@ def build_story(now: datetime | None = None, days: int = 21, with_features: bool
             f"demo-maya-{i + 1:02d}", "demo-maya", start, outcomes, rng,
             smoothness=66 + 24 * p + rng.uniform(-2, 2), roughness=1.35 - 0.35 * p,
             erratic=2 if p < 0.2 else (1 if p < 0.4 else 0), with_features=with_features,
+            speeding=3 if p < 0.25 else 2 if p < 0.5 else 1 if p < 0.75 else 0,  # she speeds less as she improves
         ))
 
     # Peers: consistently roll B and run C (until the last driver, who only rolls C).
@@ -103,5 +120,6 @@ def build_story(now: datetime | None = None, days: int = 21, with_features: bool
             trips.append(_trip(
                 f"demo-{driver[-1]}-s{i + 1}", driver, start, outcomes, rng,
                 smoothness=74 + rng.uniform(-6, 6), roughness=1.0, with_features=with_features,
+                speeding=1 if d < 2 else 0,
             ))
     return trips

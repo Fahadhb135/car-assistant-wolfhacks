@@ -12,6 +12,11 @@ export default function RootLayout() {
         <Stack.Screen name="sensor-setup" options={{ gestureEnabled: true }} />
         <Stack.Screen name="drive" options={{ gestureEnabled: false }} />
         <Stack.Screen name="trips/[id]" />
+        <Stack.Screen name="share" />
+        <Stack.Screen name="parent/index" />
+        <Stack.Screen name="parent/link" />
+        <Stack.Screen name="parent/speeding" />
+        <Stack.Screen name="parent/trips/[id]" />
         <Stack.Screen
           name="diagnostics"
           options={{

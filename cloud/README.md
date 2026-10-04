@@ -27,6 +27,20 @@ trip ids are exposed). The phone fetches it once at trip start.
   upload path. Hotspots they contribute to are flagged `demo: true`.
 - Replay it end to end: `npx tsx scripts/try-hotspots.mts http://localhost:8000 <lat> <lon> <heading> 500 25`
 
+## Parent dashboard
+`/parent/*` lets a parent follow one driver: summary, per-drive trends, past drives, one drive's detail,
+and a speeding report (`range=7d|30d|all`). Full endpoint list and the privacy rules are in the README (section 9).
+
+- Linking: the driver's phone calls `POST /drivers/{id}/share-code` (6 digits, one use, 10 minutes, location
+  hidden unless asked); the parent trades it at `POST /parent/link` for a bearer token scoped to that driver.
+  `DELETE /drivers/{id}/viewers` revokes everyone. Tokens are stored hashed; wrong codes are rate limited per client.
+- Data: Databricks publishes `publish/parent_dashboard.json` (`02_analytics`); the service caches it
+  (10 min) and adds local trips it has not processed, with the same code (`app/parent.py`). Responses carry
+  `source` and `generatedAt`. `POST /admin/parent/refresh` reloads the snapshot right after the notebook ran.
+- Try it with the seeded story: `cloud/seed_demo.py`, then `POST /drivers/demo-maya/share-code`
+  and `POST /parent/link`. Maya's smoothness climbs, her speeding alerts fall to none, and she has trip distances.
+- Tests: `tests/test_parent.py` (aggregation), `tests/test_parent_api.py` (auth, scoping, location, revocation, Databricks fallback).
+
 ## Gemini models and quota (read this before demo day)
 - Free-tier **standard flash (`gemini-flash-latest`) allows only 20 requests per day**; it was exhausted
   during testing. Chat and reports default to **`gemini-flash-lite-latest`** (about 0.5 s to first token),

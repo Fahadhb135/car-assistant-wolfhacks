@@ -117,6 +117,7 @@ export default function DriveRoute() {
       events: getEvents(),
       stampFor: driveContext.stampFor,
       transcript: driveContext.transcript(),
+      distanceM: driveContext.distanceM(),
     });
     saveTrip(trip);
     const upload = uploadStoredTrip(tripId, process.env.EXPO_PUBLIC_API_URL);
