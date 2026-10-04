@@ -29,9 +29,10 @@ export const POLICIES: Record<AlertKind, AlertPolicy> = {
   harsh_cornering: { priority: 46, ttlMs: 5_000, cooldownMs: 20_000 },
   stop_ok: { priority: 20, ttlMs: 4_000, cooldownMs: 15_000 },
   chat_reply: { priority: 30, ttlMs: 15_000, cooldownMs: 0 },
-  // Gemini's on-the-spot remark after a notable moment. Below every safety alert and the driver's
-  // own questions; dropped rather than said late. LiveCoach throttles how often it asks.
-  live_coach: { priority: 25, ttlMs: 8_000, cooldownMs: 0 },
+  // Gemini's on-the-spot remark after a notable moment. Below every predetermined clip, so it always
+  // waits for them, and never interrupted once it starts (VoiceCoordinator). Dropped if it has waited
+  // this long. LiveCoach throttles how often it asks.
+  live_coach: { priority: 15, ttlMs: 15_000, cooldownMs: 0 },
   coaching_tip: { priority: 10, ttlMs: 30_000, cooldownMs: 60_000 },
 };
 

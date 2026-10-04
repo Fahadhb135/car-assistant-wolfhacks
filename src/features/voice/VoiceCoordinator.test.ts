@@ -22,6 +22,36 @@ describe('VoiceCoordinator', () => {
     expect(speaker.spoken).toEqual([PHRASES.erratic_driving, PHRASES.crash_check]);
   });
 
+  it('clips go first, the live coach waits for them, and nothing cuts the live coach off', async () => {
+    const { speaker, voice } = setup();
+    const remark = 'Keep your hands steady for the next block.';
+    voice.speakCoach('coach-1', remark);
+    await flush();
+    expect(speaker.spoken).toEqual([remark]);
+    // A stop-sign clip and even a crash check wait for the remark to finish.
+    voice.handleEvent(ev({ kind: 'stop_sign_ahead', severity: 'info', distanceM: 40 }, 0));
+    voice.handleEvent(ev({ kind: 'crash', severity: 'critical', confirmed: false }, 0));
+    await flush();
+    expect(speaker.spoken).toEqual([remark]);
+    speaker.complete();
+    await flush();
+    expect(speaker.spoken).toEqual([remark, PHRASES.crash_check]);
+  });
+
+  it('a queued remark waits behind every clip, even one that arrives after it', async () => {
+    const { speaker, voice } = setup();
+    voice.handleEvent(ev({ kind: 'erratic_driving', severity: 'warn', score: 1 }, 0));
+    await flush();
+    voice.speakCoach('coach-1', 'Ease into the turns.');
+    voice.handleEvent(ev({ kind: 'stop_ok', severity: 'info' }, 0));
+    speaker.complete();
+    await flush();
+    expect(speaker.spoken).toEqual([PHRASES.erratic_driving, PHRASES.stop_ok]);
+    speaker.complete();
+    await flush();
+    expect(speaker.spoken).toEqual([PHRASES.erratic_driving, PHRASES.stop_ok, 'Ease into the turns.']);
+  });
+
   it('a clip and the Gemini remark wait for each other instead of cutting each other off', async () => {
     const { speaker, voice } = setup();
     voice.handleEvent(ev({ kind: 'erratic_driving', severity: 'warn', score: 1 }, 0));

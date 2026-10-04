@@ -3,8 +3,8 @@ import { AlertQueue } from './AlertQueue';
 import { alertFromEvent, chatReplyAlert, chatReplyStreamAlert, coachingTipAlert, liveCoachAlert } from './phrases';
 import type { Alert, LiveControl, Speaker, SpokenStream } from './types';
 
-/** Alerts at or above this (crash check, stop signs, speeding, highway merges) may interrupt speech. */
-export const PREEMPT_PRIORITY = 55;
+/** Spoken lines that are not fixed clips: Gemini's remarks, chat answers, and tips. */
+const NOT_PREDETERMINED: ReadonlySet<Alert['kind']> = new Set<Alert['kind']>(['live_coach', 'chat_reply', 'coaching_tip']);
 
 export type VoiceDeps = {
   speaker: Speaker;
@@ -48,7 +48,10 @@ export class VoiceCoordinator {
       // A crash check is the only automatic work that remains relevant. Releasing queued streams
       // also aborts their network work; the active lower-priority utterance is preempted below.
       this.queue.removeBelowPriority(alert.priority);
-      if (this.current && this.current.alert.priority < alert.priority) this.current.ctrl.abort();
+      // The one interruption: a crash check cuts off a clip, but never a live coaching remark.
+      if (this.current && this.current.alert.priority < alert.priority && this.current.alert.kind !== 'live_coach') {
+        this.current.ctrl.abort();
+      }
     }
     this.queue.enqueue(alert, this.now());
     this.pump();
@@ -93,13 +96,14 @@ export class VoiceCoordinator {
     const now = this.now();
     const allowTips = !this.deps.live.isActive();
 
+    // Every line finishes before the next starts; the queue orders what is waiting (predetermined
+    // clips first, the live coach last). Exceptions: a crash check interrupts a clip (handleEvent),
+    // and a predetermined clip interrupts a long chat reply, which the driver can ask again.
     if (this.current) {
       const top = this.queue.peek(now, { allowTips });
-      // Only an urgent safety alert cuts a line off; everything else waits for it to finish, so a
-      // clip and the Gemini remark that follows it play one after the other instead of colliding.
-      if (top && top.priority > this.current.alert.priority && top.priority >= PREEMPT_PRIORITY) {
-        // Settling the speaker re-enters pump() from play().
-        this.current.ctrl.abort();
+      if (this.current.alert.kind === 'chat_reply' && top && top.priority > this.current.alert.priority
+        && !NOT_PREDETERMINED.has(top.kind)) {
+        this.current.ctrl.abort(); // settling the speaker re-enters pump() from play()
       }
       return;
     }
