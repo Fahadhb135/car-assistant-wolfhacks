@@ -188,6 +188,7 @@ test('global non-crash arbitration has deterministic priority and admits at the 
         triggerLateralG: 0.4,
         minimumYawRateDps: 20,
         minimumDurationMs: 20,
+        minimumHeadingChangeDeg: 0,
         cooldownMs: 0,
       },
     },

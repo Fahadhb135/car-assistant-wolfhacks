@@ -191,7 +191,8 @@ export function useLiveImuDrive(
                 console.log(
                   `[imu] fwd ${peaks.minimumForwardG.toFixed(2)}..${peaks.maximumForwardG.toFixed(2)} g, `
                   + `lat ${peaks.maximumLateralG.toFixed(2)} g, yaw ${peaks.maximumYawDps.toFixed(0)}°/s, `
-                  + `jerk ${peaks.maximumJerkGps.toFixed(2)} g/s`,
+                  + `tilt ${peaks.maximumTiltRateDps.toFixed(0)}°/s, jerk ${peaks.maximumJerkGps.toFixed(2)} g/s `
+                  + `(rest fwd ${peaks.restingForwardG.toFixed(2)}, lat ${peaks.restingLateralG.toFixed(2)})`,
                 );
               }
             }

@@ -43,18 +43,24 @@ Hardware decoding still produces raw `sensor`-frame values. For a new SensorTile
 
 Calibration is rejected when the sample contains excessive acceleration variation, rotation, too few samples, or a degenerate orientation. Crash and raw-axis swerve processing continue, but hard-braking, rapid-acceleration, and harsh-corner candidates remain disabled until calibration succeeds.
 
-The behavior detectors first low-pass filter the vehicle-frame forward, lateral, and yaw signals (100 ms time constant). At 120 Hz the raw sample-to-sample difference is mostly sensor noise and engine vibration: unfiltered, noise alone exceeded the jerk gate and vibration kept breaking corner episodes apart. They then use configurable trigger/release hysteresis, minimum duration, continuity gaps, and cooldowns. Longitudinal candidates also require a jerk transition, counted from the release level so the onset of the maneuver is included. Cornering requires both lateral acceleration and yaw-rate evidence, which prevents an isolated vertical road bump from being called a corner. Evidence includes duration, peak acceleration, jerk, and rotation for tuning.
+The behavior detectors first low-pass filter the vehicle-frame forward, lateral, and yaw signals (100 ms time constant). At 120 Hz the raw sample-to-sample difference is mostly sensor noise and engine vibration: unfiltered, noise alone exceeded the jerk gate and vibration kept breaking corner episodes apart. They then use configurable trigger/release hysteresis, minimum duration, continuity gaps, and cooldowns. Longitudinal candidates also require a jerk transition, counted from the release level so the onset of the maneuver is included.
+
+Three guards separate driving from board handling (all measured on hand tests, where tilting and twisting produced false braking and turns):
+
+- **Resting level.** While the board is still (total acceleration within 0.02 g of 1 g, rotation under 3°/s) the forward/lateral reading can only be gravity from a mount that shifted since calibration. It is tracked with a 3 s time constant and subtracted, so a board that sags 27° does not read as permanent 0.45 g braking.
+- **Tilt guard.** Braking, acceleration, cornering, and drastic slowing are ignored while the board pitches or rolls faster than 45°/s, because tilting moves gravity onto those axes; a car pitches and rolls only a few °/s. Drastic slowing of 2 g or more is still a possible crash, since tilt adds at most 1 g.
+- **Heading.** A sharp turn must sweep at least 45° in one direction. Swerves and lane changes reverse after small arcs, which passes the yaw rate through zero and restarts the count. Cornering requires both lateral acceleration and yaw-rate evidence, which prevents an isolated vertical road bump from being called a corner. Evidence includes duration, peak acceleration, jerk, and rotation for tuning.
 
 ### Defaults
 
 | Detector | Trigger evidence | Sustained duration / quality |
 |---|---|---|
 | Possible crash (impact) | acceleration magnitude ≥ 4.5 g and peak rotation ≥ 35°/s | ≥ 80 ms or ≥ 0.16 g·s excess impulse; 100 ms maximum continuity gap |
-| Possible crash (drastic slowing, calibrated) | smoothed forward acceleration ≤ -1.2 g, beyond what tyres can brake; release at -0.6 g | ≥ 120 ms |
+| Possible crash (drastic slowing, calibrated) | smoothed forward acceleration ≤ -1.2 g, beyond what tyres can brake; release at -0.6 g | ≥ 120 ms; no fast tilt unless ≥ 2 g |
 | Swerve | ≥ 4 direction changes, rotation-axis SD ≥ 35°/s, acceleration-magnitude SD ≥ 0.18 g | ≥ 40 samples, ≤ 15% missing samples |
-| Firm braking | smoothed forward acceleration ≤ -0.35 g; release at -0.15 g | ≥ 250 ms and jerk ≥ 1 g/s (about 10 m/s³) |
+| Firm braking | smoothed forward acceleration ≤ -0.35 g; release at -0.15 g | ≥ 250 ms, jerk ≥ 1 g/s (about 10 m/s³), no fast tilt |
 | Rapid acceleration | forward acceleration ≥ 0.40 g; release at 0.18 g | ≥ 500 ms and jerk ≥ 0.60 g/s |
-| Sharp turn | smoothed lateral acceleration ≥ 0.30 g and yaw ≥ 15°/s | ≥ 300 ms; release below 0.15 g or 6°/s |
+| Sharp turn | smoothed lateral acceleration ≥ 0.30 g and yaw ≥ 15°/s | ≥ 300 ms and ≥ 45° of heading in one direction, no fast tilt; release below 0.15 g or 6°/s |
 
 For scale: a brisk 90° turn at 15 mph pulls about 0.4 g at 35°/s, and a gentle one stays under 0.25 g.
 
@@ -63,8 +69,8 @@ Detector-local crash, swerve, and maneuver cooldowns default to 10 seconds. The 
 In a development build, a live drive logs the smoothed extremes to Metro every 2 seconds, plus every candidate's evidence, for tuning against real drives:
 
 ```
-[imu] fwd -0.42..0.08 g, lat 0.31 g, yaw 27°/s, jerk 1.40 g/s
-[imu] harsh_corner_candidate {"durationMs":300,"peakAccelerationG":0.33,...}
+[imu] fwd -0.42..0.08 g, lat 0.31 g, yaw 27°/s, tilt 4°/s, jerk 1.40 g/s (rest fwd -0.03, lat 0.01)
+[imu] harsh_corner_candidate {"durationMs":900,"peakAccelerationG":0.33,...,"headingChangeDeg":52}
 ``` Every value remains constructor-configurable and provisional pending physical validation.
 
 ## Usage

@@ -95,6 +95,8 @@ export type HarshCorneringConfig = Readonly<{
   minimumYawRateDps: number;
   releaseYawRateDps: number;
   minimumDurationMs: number;
+  /** Heading swept in one direction: a turn is a big arc, a swerve is small alternating arcs. */
+  minimumHeadingChangeDeg: number;
   cooldownMs: number;
 }>;
 
@@ -104,12 +106,29 @@ export type SevereDecelerationConfig = Readonly<{
   releaseLongitudinalG: number;
   minimumDurationMs: number;
   cooldownMs: number;
+  /** At or above this deceleration, tilting cannot explain the reading, so the tilt guard is skipped. */
+  tiltExemptG: number;
+}>;
+
+/** Learns the board's resting forward/lateral reading while it is still, so mount drift is not motion. */
+export type RestingLevelConfig = Readonly<{
+  timeConstantMs: number;
+  /** Still means the total acceleration is within this of 1 g (no horizontal acceleration)... */
+  stillAccelerationToleranceG: number;
+  /** ...and the board is rotating slower than this. */
+  stillRotationDps: number;
 }>;
 
 export type DrivingBehaviorConfig = Readonly<{
   maximumContinuityGapMs: number;
   /** Time constant of the low-pass filter applied before every behavior threshold and jerk. */
   smoothingTimeConstantMs: number;
+  /**
+   * Pitch/roll rate above which braking, acceleration, cornering, and drastic slowing are ignored:
+   * tilting moves gravity onto the forward/lateral axes. A car pitches and rolls only a few °/s.
+   */
+  maximumTiltRateDps: number;
+  restingLevel: RestingLevelConfig;
   severeDeceleration: SevereDecelerationConfig;
   hardBraking: LongitudinalBehaviorConfig;
   rapidAcceleration: LongitudinalBehaviorConfig;
@@ -139,6 +158,8 @@ export type PartialImuPipelineConfig = Readonly<{
   behaviors?: Readonly<{
     maximumContinuityGapMs?: number;
     smoothingTimeConstantMs?: number;
+    maximumTiltRateDps?: number;
+    restingLevel?: Partial<RestingLevelConfig>;
     severeDeceleration?: Partial<SevereDecelerationConfig>;
     hardBraking?: Partial<LongitudinalBehaviorConfig>;
     rapidAcceleration?: Partial<LongitudinalBehaviorConfig>;

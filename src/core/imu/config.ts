@@ -39,12 +39,19 @@ export const DEFAULT_IMU_PIPELINE_CONFIG: ImuPipelineConfig = Object.freeze({
   behaviors: Object.freeze({
     maximumContinuityGapMs: 100,
     smoothingTimeConstantMs: 100,
+    maximumTiltRateDps: 45,
+    restingLevel: Object.freeze({
+      timeConstantMs: 3_000,
+      stillAccelerationToleranceG: 0.02,
+      stillRotationDps: 3,
+    }),
     // A car's tyres top out near 1 g of braking; anything beyond that, sustained, means a collision.
     severeDeceleration: Object.freeze({
       triggerLongitudinalG: 1.2,
       releaseLongitudinalG: 0.6,
       minimumDurationMs: 120,
       cooldownMs: 10_000,
+      tiltExemptG: 2,
     }),
     // Firm braking: decelerating at ≥ 0.35 g, entered with a jerk of ≥ 1 g/s (about 10 m/s³).
     hardBraking: Object.freeze({
@@ -62,12 +69,14 @@ export const DEFAULT_IMU_PIPELINE_CONFIG: ImuPipelineConfig = Object.freeze({
       cooldownMs: 10_000,
     }),
     // A brisk 90° turn at 15 mph pulls about 0.4 g at 35°/s; a gentle one stays under 0.25 g.
+    // Swerves and lane changes sweep well under 45° each way before reversing.
     harshCornering: Object.freeze({
       triggerLateralG: 0.3,
       releaseLateralG: 0.15,
       minimumYawRateDps: 15,
       releaseYawRateDps: 6,
       minimumDurationMs: 300,
+      minimumHeadingChangeDeg: 45,
       cooldownMs: 10_000,
     }),
   }),
@@ -91,6 +100,9 @@ export function resolvePipelineConfig(partial: PartialImuPipelineConfig = {}): I
         ?? DEFAULT_IMU_PIPELINE_CONFIG.behaviors.maximumContinuityGapMs,
       smoothingTimeConstantMs: partial.behaviors?.smoothingTimeConstantMs
         ?? DEFAULT_IMU_PIPELINE_CONFIG.behaviors.smoothingTimeConstantMs,
+      maximumTiltRateDps: partial.behaviors?.maximumTiltRateDps
+        ?? DEFAULT_IMU_PIPELINE_CONFIG.behaviors.maximumTiltRateDps,
+      restingLevel: { ...DEFAULT_IMU_PIPELINE_CONFIG.behaviors.restingLevel, ...partial.behaviors?.restingLevel },
       severeDeceleration: { ...DEFAULT_IMU_PIPELINE_CONFIG.behaviors.severeDeceleration, ...partial.behaviors?.severeDeceleration },
       hardBraking: { ...DEFAULT_IMU_PIPELINE_CONFIG.behaviors.hardBraking, ...partial.behaviors?.hardBraking },
       rapidAcceleration: { ...DEFAULT_IMU_PIPELINE_CONFIG.behaviors.rapidAcceleration, ...partial.behaviors?.rapidAcceleration },
@@ -130,6 +142,10 @@ export function resolvePipelineConfig(partial: PartialImuPipelineConfig = {}): I
   if (!Number.isFinite(config.behaviors.smoothingTimeConstantMs) || config.behaviors.smoothingTimeConstantMs < 0) {
     throw new Error('smoothingTimeConstantMs must be finite and non-negative');
   }
+  positive(config.behaviors.maximumTiltRateDps, 'maximumTiltRateDps');
+  positive(config.behaviors.restingLevel.timeConstantMs, 'restingLevel timeConstantMs');
+  positive(config.behaviors.restingLevel.stillAccelerationToleranceG, 'restingLevel stillAccelerationToleranceG');
+  positive(config.behaviors.restingLevel.stillRotationDps, 'restingLevel stillRotationDps');
   const severe = config.behaviors.severeDeceleration;
   positive(severe.triggerLongitudinalG, 'severeDeceleration triggerLongitudinalG');
   if (severe.releaseLongitudinalG < 0 || severe.releaseLongitudinalG >= severe.triggerLongitudinalG) {
@@ -139,6 +155,9 @@ export function resolvePipelineConfig(partial: PartialImuPipelineConfig = {}): I
     throw new Error('severeDeceleration must trigger above hard braking');
   }
   positive(severe.minimumDurationMs, 'severeDeceleration minimumDurationMs');
+  if (!(severe.tiltExemptG >= severe.triggerLongitudinalG)) {
+    throw new Error('severeDeceleration tiltExemptG must be at or above its trigger');
+  }
   if (severe.cooldownMs < 0) throw new Error('severeDeceleration cooldownMs must be non-negative');
   for (const [name, behavior] of [
     ['hardBraking', config.behaviors.hardBraking],
@@ -163,6 +182,9 @@ export function resolvePipelineConfig(partial: PartialImuPipelineConfig = {}): I
     throw new Error('harshCornering releaseYawRateDps must be non-negative and below its trigger');
   }
   positive(config.behaviors.harshCornering.minimumDurationMs, 'harshCornering minimumDurationMs');
+  if (!(config.behaviors.harshCornering.minimumHeadingChangeDeg >= 0)) {
+    throw new Error('harshCornering minimumHeadingChangeDeg must be non-negative');
+  }
   if (config.behaviors.harshCornering.cooldownMs < 0) throw new Error('harshCornering cooldownMs must be non-negative');
   return config;
 }

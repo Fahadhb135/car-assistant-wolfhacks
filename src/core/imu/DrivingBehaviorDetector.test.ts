@@ -80,9 +80,10 @@ test('detects hard braking, rapid acceleration, and harsh cornering once per man
   const acceleration = run({ x: 0.6, y: 0, z: 1 });
   assert.deepEqual(acceleration.map((event) => event.kind), ['rapid_acceleration_candidate']);
 
-  const corner = run({ x: 0, y: 0.7, z: 1 }, { x: 0, y: 0, z: 45 });
+  const corner = run({ x: 0, y: 0.7, z: 1 }, { x: 0, y: 0, z: 90 });
   assert.deepEqual(corner.map((event) => event.kind), ['harsh_corner_candidate']);
-  assert.ok(corner[0]!.evidence.peakRotationDps >= 30); // smoothed toward the 45°/s input
+  assert.ok(corner[0]!.evidence.peakRotationDps >= 60); // smoothed toward the 90°/s input
+  assert.ok(corner[0]!.evidence.headingChangeDeg! >= 45);
 });
 
 test('rejects ordinary stops, starts, and gentle turns', () => {
@@ -91,13 +92,14 @@ test('rejects ordinary stops, starts, and gentle turns', () => {
   assert.deepEqual(run({ x: 0, y: 0.2, z: 1 }, { x: 0, y: 0, z: 12 }), []);
 });
 
+type Motion = { x: number; y: number; yaw: number; z?: number; pitch?: number };
+
 /** Feeds a 120 Hz stream whose forward/lateral/yaw values come from `at(ms)`. */
-function stream(durationMs: number, at: (ms: number, index: number) => { x: number; y: number; yaw: number }) {
-  const detector = new DrivingBehaviorDetector(DEFAULT_IMU_PIPELINE_CONFIG.behaviors);
+function stream(durationMs: number, at: (ms: number, index: number) => Motion, detector = new DrivingBehaviorDetector(DEFAULT_IMU_PIPELINE_CONFIG.behaviors), startMs = 0) {
   const events = [];
   for (let index = 0, time = 0; time <= durationMs; index++, time = (index * 1_000) / 120) {
-    const { x, y, yaw } = at(time, index);
-    events.push(...detector.process(toVehicleFrame(sample(time, { x, y, z: 1 }, { x: 0, y: 0, z: yaw }), identity)));
+    const { x, y, yaw, z = 1, pitch = 0 } = at(time, index);
+    events.push(...detector.process(toVehicleFrame(sample(startMs + time, { x, y, z }, { x: 0, y: pitch, z: yaw }), identity)));
   }
   return { events, detector };
 }
@@ -126,12 +128,48 @@ test('vibration around a normal slowdown is neither jerk nor braking', () => {
 });
 
 test('detects a sharp turn even when road vibration dips each sample below release', () => {
-  const { events } = stream(1_500, (ms, index) => ({
+  const { events } = stream(2_000, (ms, index) => ({
     x: 0,
     y: ms < 100 ? 0 : 0.4 + (index % 2 ? 0.28 : -0.28),
-    yaw: ms < 100 ? 0 : 30,
+    yaw: ms < 100 ? 0 : 40,
   }));
   assert.deepEqual(events.map((event) => event.kind), ['harsh_corner_candidate']);
+});
+
+test('a sharp turn is a big arc; a swerve of small alternating arcs is not a turn', () => {
+  // A 90° intersection turn: 0.4 g at 45°/s for two seconds.
+  const turn = stream(2_500, (ms) => ({ x: 0, y: ms < 2_000 ? 0.4 : 0, yaw: ms < 2_000 ? 45 : 0 }));
+  assert.deepEqual(turn.events.map((event) => event.kind), ['harsh_corner_candidate']);
+  // Weaving: 0.5 g and 80°/s, reversing every 400 ms (about 30° each way).
+  const weave = stream(3_000, (ms) => {
+    const side = Math.floor(ms / 400) % 2 ? -1 : 1;
+    return { x: 0, y: 0.5 * side, yaw: 80 * side };
+  });
+  assert.deepEqual(weave.events, []);
+});
+
+test('tilting the board is not braking, but a 2 g stop is a crash even while tilting', () => {
+  // Pitching the board 30° in half a second moves half a g of gravity onto the forward axis.
+  const tilt = stream(1_500, (ms) => {
+    const angle = (Math.min(ms, 500) / 500) * (Math.PI / 6);
+    return { x: -Math.sin(angle), y: 0, z: Math.cos(angle), yaw: 0, pitch: ms < 500 ? 60 : 0 };
+  });
+  assert.deepEqual(tilt.events, []);
+  const slam = stream(600, (ms) => ({ x: ms < 100 ? 0 : -2.6, y: 0, yaw: 0, pitch: ms < 100 ? 0 : 120 }));
+  assert.deepEqual(slam.events.map((event) => event.kind), ['crash_candidate']);
+});
+
+test('learns a shifted mount at rest, so the tilt is not braking but a real stop still is', () => {
+  // The board sits 27° nose-down since calibration: 0.45 g of gravity on the forward axis.
+  const restingTilt = { x: -0.45, y: 0, z: Math.sqrt(1 - 0.45 ** 2), yaw: 0 };
+  const settled = stream(10_000, () => restingTilt);
+  assert.deepEqual(settled.events, []);
+  const peaks = settled.detector.takeMotionPeaks()!;
+  assert.ok(Math.abs(peaks.restingForwardG + 0.45) < 0.02, 'the resting level tracks the tilt');
+  // A real stop from there: another 0.5 g within 200 ms.
+  const stop = stream(1_500, (ms) => ({ ...restingTilt, x: -0.45 - Math.min(0.5, ms / 400) }), settled.detector, 10_100);
+  assert.deepEqual(stop.events.map((event) => event.kind), ['hard_braking_candidate']);
+  assert.ok(Math.abs(stop.events[0]!.evidence.peakAccelerationG - 0.5) < 0.05);
 });
 
 test('reports smoothed motion peaks since the last read', () => {

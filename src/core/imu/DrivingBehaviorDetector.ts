@@ -8,7 +8,8 @@ type BehaviorKind =
   | 'rapid_acceleration_candidate'
   | 'harsh_corner_candidate';
 
-type Smoothed = { forward: number; lateral: number; yaw: number };
+/** Low-pass-filtered vehicle-frame signal. `pitch`/`roll` are the forward/lateral rotation rates. */
+type Smoothed = { forward: number; lateral: number; yaw: number; pitch: number; roll: number };
 
 /** Extremes of the smoothed vehicle-frame signal since the last `takeMotionPeaks()`, for tuning. */
 export type MotionPeaks = Readonly<{
@@ -16,7 +17,11 @@ export type MotionPeaks = Readonly<{
   maximumForwardG: number;
   maximumLateralG: number;
   maximumYawDps: number;
+  maximumTiltRateDps: number;
   maximumJerkGps: number;
+  /** The learned resting level being subtracted, at the time of the read. */
+  restingForwardG: number;
+  restingLateralG: number;
 }>;
 
 type Episode = {
@@ -25,11 +30,34 @@ type Episode = {
   peakPrimary: number;
   peakJerkGps: number;
   peakRotationDps: number;
+  /** Degrees swept in one direction while the episode is open (cornering only). */
+  headingDeg: number;
+  /** The board tilted fast during this episode, so gravity, not the car, may explain it. */
+  tilted: boolean;
   emitted: boolean;
   cooldownUntilMs: number;
 };
 
-const emptyEpisode = (): Episode => ({ peakPrimary: 0, peakJerkGps: 0, peakRotationDps: 0, emitted: false, cooldownUntilMs: -Infinity });
+const emptyEpisode = (): Episode => ({
+  peakPrimary: 0,
+  peakJerkGps: 0,
+  peakRotationDps: 0,
+  headingDeg: 0,
+  tilted: false,
+  emitted: false,
+  cooldownUntilMs: -Infinity,
+});
+
+function clearEpisode(episode: Episode): void {
+  episode.startedAtMs = undefined;
+  episode.lastAtMs = undefined;
+  episode.peakPrimary = 0;
+  episode.peakJerkGps = 0;
+  episode.peakRotationDps = 0;
+  episode.headingDeg = 0;
+  episode.tilted = false;
+  episode.emitted = false;
+}
 
 function confidence(value: number, threshold: number, duration: number, minimumDuration: number): number {
   const strength = Math.min(1, Math.max(0, value / threshold - 1) / 1.5);
@@ -45,6 +73,7 @@ export class DrivingBehaviorDetector {
   private corner = emptyEpisode();
   private previous?: VehicleFrameSample;
   private smoothed?: Smoothed;
+  private resting = { forward: 0, lateral: 0 };
   private peaks?: { -readonly [K in keyof MotionPeaks]: number };
 
   constructor(private readonly config: DrivingBehaviorConfig) {}
@@ -52,10 +81,12 @@ export class DrivingBehaviorDetector {
   process(sample: VehicleFrameSample): readonly ImuEvent[] {
     const events: ImuEvent[] = [];
     const elapsedMs = this.previous ? sample.receivedMonotonicMs - this.previous.receivedMonotonicMs : 0;
-    const raw = {
+    const raw: Smoothed = {
       forward: sample.accelerationG.forward,
       lateral: sample.accelerationG.lateral,
       yaw: sample.angularVelocityDps.vertical,
+      pitch: sample.angularVelocityDps.lateral,
+      roll: sample.angularVelocityDps.forward,
     };
     if (this.previous && (elapsedMs <= 0 || elapsedMs > this.config.maximumContinuityGapMs)) {
       this.clearActiveEpisodes();
@@ -67,23 +98,27 @@ export class DrivingBehaviorDetector {
     // Low-pass filter: at 120 Hz, raw sample-to-sample differences are mostly sensor noise and
     // engine vibration, which made every brake look "jerky" and broke corner episodes apart.
     const elapsedSeconds = elapsedMs / 1_000;
-    const previousForward = this.smoothed?.forward ?? raw.forward;
     const tau = this.config.smoothingTimeConstantMs;
     const alpha = !this.smoothed || tau === 0 ? 1 : 1 - Math.exp(-elapsedMs / tau);
-    const smoothed: Smoothed = this.smoothed
-      ? {
-          forward: this.smoothed.forward + alpha * (raw.forward - this.smoothed.forward),
-          lateral: this.smoothed.lateral + alpha * (raw.lateral - this.smoothed.lateral),
-          yaw: this.smoothed.yaw + alpha * (raw.yaw - this.smoothed.yaw),
-        }
-      : raw;
+    const before = this.smoothed ?? raw;
+    const smoothed: Smoothed = {
+      forward: before.forward + alpha * (raw.forward - before.forward),
+      lateral: before.lateral + alpha * (raw.lateral - before.lateral),
+      yaw: before.yaw + alpha * (raw.yaw - before.yaw),
+      pitch: before.pitch + alpha * (raw.pitch - before.pitch),
+      roll: before.roll + alpha * (raw.roll - before.roll),
+    };
     this.smoothed = smoothed;
+    this.updateRestingLevel(sample, smoothed, elapsedMs);
 
-    const longitudinal = smoothed.forward;
-    const lateral = Math.abs(smoothed.lateral);
+    const longitudinal = smoothed.forward - this.resting.forward;
+    const previousLongitudinal = before.forward - this.resting.forward;
+    const lateral = Math.abs(smoothed.lateral - this.resting.lateral);
     const yaw = Math.abs(smoothed.yaw);
-    const jerk = elapsedSeconds > 0 ? Math.abs(longitudinal - previousForward) / elapsedSeconds : 0;
-    this.recordPeaks(longitudinal, lateral, yaw, jerk);
+    const tiltRate = Math.hypot(smoothed.pitch, smoothed.roll);
+    const tilting = tiltRate > this.config.maximumTiltRateDps;
+    const jerk = elapsedSeconds > 0 ? Math.abs(longitudinal - previousLongitudinal) / elapsedSeconds : 0;
+    this.recordPeaks(longitudinal, lateral, yaw, tiltRate, jerk);
 
     const severe = this.updateEpisode({
       episode: this.severe,
@@ -94,6 +129,8 @@ export class DrivingBehaviorDetector {
       primary: Math.abs(longitudinal),
       jerk,
       rotation: yaw,
+      tilting,
+      tiltExemptAbove: this.config.severeDeceleration.tiltExemptG,
       now: sample.receivedMonotonicMs,
       minimumDurationMs: this.config.severeDeceleration.minimumDurationMs,
       minimumJerkGps: 0,
@@ -111,6 +148,7 @@ export class DrivingBehaviorDetector {
       primary: Math.abs(longitudinal),
       jerk,
       rotation: yaw,
+      tilting,
       now: sample.receivedMonotonicMs,
       minimumDurationMs: this.config.hardBraking.minimumDurationMs,
       minimumJerkGps: this.config.hardBraking.minimumJerkGps,
@@ -128,6 +166,7 @@ export class DrivingBehaviorDetector {
       primary: longitudinal,
       jerk,
       rotation: yaw,
+      tilting,
       now: sample.receivedMonotonicMs,
       minimumDurationMs: this.config.rapidAcceleration.minimumDurationMs,
       minimumJerkGps: this.config.rapidAcceleration.minimumJerkGps,
@@ -136,6 +175,8 @@ export class DrivingBehaviorDetector {
     });
     if (acceleration) events.push(acceleration);
 
+    // Turning back the other way passes the yaw rate through zero, which releases the episode and
+    // restarts the heading: only a sustained arc in one direction can reach the heading minimum.
     const corner = this.updateEpisode({
       episode: this.corner,
       kind: 'harsh_corner_candidate',
@@ -147,6 +188,9 @@ export class DrivingBehaviorDetector {
       primary: lateral,
       jerk: 0,
       rotation: yaw,
+      tilting,
+      headingStepDeg: yaw * elapsedSeconds,
+      minimumHeadingChangeDeg: this.config.harshCornering.minimumHeadingChangeDeg,
       now: sample.receivedMonotonicMs,
       minimumDurationMs: this.config.harshCornering.minimumDurationMs,
       minimumJerkGps: 0,
@@ -163,38 +207,53 @@ export class DrivingBehaviorDetector {
   takeMotionPeaks(): MotionPeaks | undefined {
     const peaks = this.peaks;
     this.peaks = undefined;
-    return peaks ? Object.freeze({ ...peaks }) : undefined;
+    return peaks
+      ? Object.freeze({ ...peaks, restingForwardG: this.resting.forward, restingLateralG: this.resting.lateral })
+      : undefined;
   }
 
   reset(): void {
     this.severe = emptyEpisode();
-    this.smoothed = undefined;
-    this.peaks = undefined;
     this.brake = emptyEpisode();
     this.acceleration = emptyEpisode();
     this.corner = emptyEpisode();
     this.previous = undefined;
+    this.smoothed = undefined;
+    this.resting = { forward: 0, lateral: 0 };
+    this.peaks = undefined;
+  }
+
+  /**
+   * While the board is still (total acceleration ≈ 1 g and no rotation), any forward/lateral reading
+   * is gravity from a tilted mount, not motion. Track it slowly so a board that shifted since its
+   * calibration does not read as permanent braking or cornering.
+   */
+  private updateRestingLevel(sample: VehicleFrameSample, smoothed: Smoothed, elapsedMs: number): void {
+    const { forward, lateral, vertical } = sample.accelerationG;
+    const rotation = Math.hypot(smoothed.yaw, smoothed.pitch, smoothed.roll);
+    const config = this.config.restingLevel;
+    if (Math.abs(Math.hypot(forward, lateral, vertical) - 1) > config.stillAccelerationToleranceG
+      || rotation > config.stillRotationDps) return;
+    const alpha = 1 - Math.exp(-elapsedMs / config.timeConstantMs);
+    this.resting.forward += alpha * (smoothed.forward - this.resting.forward);
+    this.resting.lateral += alpha * (smoothed.lateral - this.resting.lateral);
   }
 
   private clearActiveEpisodes(): void {
-    for (const episode of [this.severe, this.brake, this.acceleration, this.corner]) {
-      episode.startedAtMs = undefined;
-      episode.lastAtMs = undefined;
-      episode.peakPrimary = 0;
-      episode.peakJerkGps = 0;
-      episode.peakRotationDps = 0;
-      episode.emitted = false;
-    }
+    for (const episode of [this.severe, this.brake, this.acceleration, this.corner]) clearEpisode(episode);
   }
 
-  private recordPeaks(forward: number, lateral: number, yaw: number, jerk: number): void {
+  private recordPeaks(forward: number, lateral: number, yaw: number, tiltRate: number, jerk: number): void {
     if (!this.peaks) {
       this.peaks = {
         minimumForwardG: forward,
         maximumForwardG: forward,
         maximumLateralG: lateral,
         maximumYawDps: yaw,
+        maximumTiltRateDps: tiltRate,
         maximumJerkGps: jerk,
+        restingForwardG: this.resting.forward,
+        restingLateralG: this.resting.lateral,
       };
       return;
     }
@@ -202,6 +261,7 @@ export class DrivingBehaviorDetector {
     this.peaks.maximumForwardG = Math.max(this.peaks.maximumForwardG, forward);
     this.peaks.maximumLateralG = Math.max(this.peaks.maximumLateralG, lateral);
     this.peaks.maximumYawDps = Math.max(this.peaks.maximumYawDps, yaw);
+    this.peaks.maximumTiltRateDps = Math.max(this.peaks.maximumTiltRateDps, tiltRate);
     this.peaks.maximumJerkGps = Math.max(this.peaks.maximumJerkGps, jerk);
   }
 
@@ -214,6 +274,11 @@ export class DrivingBehaviorDetector {
     primary: number;
     jerk: number;
     rotation: number;
+    tilting: boolean;
+    /** A peak at or above this is accepted even if the board tilted (tilt adds at most 1 g). */
+    tiltExemptAbove?: number;
+    headingStepDeg?: number;
+    minimumHeadingChangeDeg?: number;
     now: number;
     minimumDurationMs: number;
     minimumJerkGps: number;
@@ -222,24 +287,24 @@ export class DrivingBehaviorDetector {
   }>): ImuEvent | undefined {
     const episode = options.episode;
     if (options.released) {
-      episode.startedAtMs = undefined;
-      episode.lastAtMs = undefined;
-      episode.peakPrimary = 0;
-      episode.peakJerkGps = 0;
-      episode.peakRotationDps = 0;
-      episode.emitted = false;
+      clearEpisode(episode);
       return undefined;
     }
-    // The jerk of the onset happens on the way to the trigger, so count it from the release level.
+    // Onset jerk, tilt, and heading build up on the way to the trigger, so count them from release.
     episode.peakJerkGps = Math.max(episode.peakJerkGps, options.jerk);
+    episode.tilted ||= options.tilting;
+    episode.headingDeg += options.headingStepDeg ?? 0;
     if (!options.active) return undefined;
     episode.startedAtMs ??= options.now;
     episode.lastAtMs = options.now;
     episode.peakPrimary = Math.max(episode.peakPrimary, options.primary);
     episode.peakRotationDps = Math.max(episode.peakRotationDps, options.rotation);
     const durationMs = options.now - episode.startedAtMs;
+    const tiltExcused = options.tiltExemptAbove !== undefined && episode.peakPrimary >= options.tiltExemptAbove;
     if (episode.emitted || options.now < episode.cooldownUntilMs
-      || durationMs < options.minimumDurationMs || episode.peakJerkGps < options.minimumJerkGps) return undefined;
+      || durationMs < options.minimumDurationMs || episode.peakJerkGps < options.minimumJerkGps
+      || (episode.tilted && !tiltExcused)
+      || episode.headingDeg < (options.minimumHeadingChangeDeg ?? 0)) return undefined;
 
     episode.emitted = true;
     episode.cooldownUntilMs = options.now + options.cooldownMs;
@@ -253,6 +318,7 @@ export class DrivingBehaviorDetector {
         peakAccelerationG: episode.peakPrimary,
         peakJerkGps: episode.peakJerkGps,
         peakRotationDps: episode.peakRotationDps,
+        ...(options.headingStepDeg !== undefined ? { headingChangeDeg: episode.headingDeg } : {}),
       }),
     });
   }
