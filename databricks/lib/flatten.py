@@ -29,8 +29,12 @@ def flatten_trip(trip: dict) -> tuple[dict, list[dict], list[dict]]:
         "durationS": max(0, (trip["end"] - trip["start"]) // 1000),
         "smoothness": scores.get("smoothness"),
         "stopCompliance": scores.get("stopCompliance"),
+        "distanceM": scores.get("distanceM"),  # None for trips uploaded before the app recorded distance
         "nEvents": len(events),
         "nBadEvents": sum(1 for e in events if e["kind"] in BAD_KINDS),
+        # Speeding is not in BAD_KINDS (that would change every existing score and risky-location
+        # count), so the parent dashboard reads it from here. These are coach alerts, not minutes.
+        "nSpeeding": sum(1 for e in events if e["kind"] == "speeding"),
         # A heuristic motion candidate must never become a confirmed crash in analytics.
         "hadCrash": any(e["kind"] == "crash" and e.get("confirmed") is True for e in events),
     }

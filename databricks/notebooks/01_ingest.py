@@ -19,7 +19,12 @@ spark.sql(f"CREATE VOLUME IF NOT EXISTS {CAT}.{SCH}.{VOL}")
 # COMMAND ----------
 spark.sql(f"""CREATE TABLE IF NOT EXISTS {CAT}.{SCH}.trips (
   tripId STRING, driverId STRING, startMs BIGINT, endMs BIGINT, durationS BIGINT,
-  smoothness DOUBLE, stopCompliance DOUBLE, nEvents INT, nBadEvents INT, hadCrash BOOLEAN)""")
+  smoothness DOUBLE, stopCompliance DOUBLE, nEvents INT, nBadEvents INT, hadCrash BOOLEAN,
+  distanceM DOUBLE, nSpeeding INT)""")
+trip_columns = spark.table(f"{CAT}.{SCH}.trips").columns
+for col, typ in [("distanceM", "DOUBLE"), ("nSpeeding", "INT")]:
+    if col not in trip_columns:
+        spark.sql(f"ALTER TABLE {CAT}.{SCH}.trips ADD COLUMNS ({col} {typ})")
 spark.sql(f"""CREATE TABLE IF NOT EXISTS {CAT}.{SCH}.events (
   tripId STRING, driverId STRING, eventId STRING, tMs BIGINT, kind STRING, isBad BOOLEAN,
   lat DOUBLE, lon DOUBLE, score DOUBLE, confirmed BOOLEAN, evidenceJson STRING, gridCell STRING,

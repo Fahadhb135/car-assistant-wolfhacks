@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { Button, Card, Divider, Surface, Text } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { getParentSession } from '@/features/parent-dashboard/parentSession';
 import { colors } from '@/theme';
 
 export default function HomeRoute() {
@@ -84,6 +85,25 @@ export default function HomeRoute() {
           </Text>
         </Surface>
 
+        <View style={styles.parentRow}>
+          <Button
+            mode="outlined"
+            icon="account-heart-outline"
+            style={styles.parentButton}
+            onPress={() => router.push('/share')}
+          >
+            Share with a parent
+          </Button>
+          <Button
+            mode="outlined"
+            icon="chart-line"
+            style={styles.parentButton}
+            onPress={() => router.push(getParentSession() ? '/parent' : '/parent/link')}
+          >
+            Parent view
+          </Button>
+        </View>
+
         <Button
           compact
           mode="text"
@@ -132,4 +152,6 @@ const styles = StyleSheet.create({
   privacyNote: { backgroundColor: colors.mint, borderRadius: 20, gap: 6, padding: 18 },
   privacyCopy: { color: colors.muted, lineHeight: 21 },
   diagnostics: { alignSelf: 'center', marginTop: 2 },
+  parentRow: { flexDirection: 'row', gap: 10 },
+  parentButton: { flex: 1 },
 });
