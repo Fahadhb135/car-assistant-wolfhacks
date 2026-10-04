@@ -73,16 +73,22 @@ test('rejects calibration while the sensor is moving', () => {
 });
 
 test('detects hard braking, rapid acceleration, and harsh cornering once per maneuver', () => {
-  const braking = run({ x: -0.5, y: 0, z: 1 });
+  const braking = run({ x: -0.65, y: 0, z: 1 });
   assert.deepEqual(braking.map((event) => event.kind), ['hard_braking_candidate']);
   assert.ok(braking[0]!.evidence.peakJerkGps > 0);
 
-  const acceleration = run({ x: 0.45, y: 0, z: 1 });
+  const acceleration = run({ x: 0.6, y: 0, z: 1 });
   assert.deepEqual(acceleration.map((event) => event.kind), ['rapid_acceleration_candidate']);
 
-  const corner = run({ x: 0, y: 0.55, z: 1 }, { x: 0, y: 0, z: 35 });
+  const corner = run({ x: 0, y: 0.7, z: 1 }, { x: 0, y: 0, z: 45 });
   assert.deepEqual(corner.map((event) => event.kind), ['harsh_corner_candidate']);
-  assert.ok(corner[0]!.evidence.peakRotationDps >= 35);
+  assert.ok(corner[0]!.evidence.peakRotationDps >= 45);
+});
+
+test('rejects ordinary stops, starts, and turns below the conservative defaults', () => {
+  assert.deepEqual(run({ x: -0.35, y: 0, z: 1 }), []);
+  assert.deepEqual(run({ x: 0.3, y: 0, z: 1 }), []);
+  assert.deepEqual(run({ x: 0, y: 0.4, z: 1 }, { x: 0, y: 0, z: 22 }), []);
 });
 
 test('does not call an isolated road bump a driving behavior', () => {
@@ -97,7 +103,7 @@ test('does not call an isolated road bump a driving behavior', () => {
 
 test('does not integrate a behavior across a stream gap', () => {
   const detector = new DrivingBehaviorDetector(DEFAULT_IMU_PIPELINE_CONFIG.behaviors);
-  const hardBrake = { x: -0.5, y: 0, z: 1 };
+  const hardBrake = { x: -0.65, y: 0, z: 1 };
   detector.process(toVehicleFrame(sample(0), identity));
   detector.process(toVehicleFrame(sample(80, hardBrake), identity));
   detector.process(toVehicleFrame(sample(160, hardBrake), identity));

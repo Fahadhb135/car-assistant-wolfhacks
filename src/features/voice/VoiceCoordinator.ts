@@ -20,6 +20,7 @@ export class VoiceCoordinator {
   private queue = new AlertQueue();
   private current: { alert: Alert; ctrl: AbortController } | null = null;
   private livePaused = false;
+  private possibleCrashHandled = false;
   private readonly now: () => number;
 
   constructor(private deps: VoiceDeps) {
@@ -27,8 +28,18 @@ export class VoiceCoordinator {
   }
 
   handleEvent(event: DriveEvent): void {
+    if (event.kind === 'crash' && !event.confirmed) {
+      if (this.possibleCrashHandled) return;
+      this.possibleCrashHandled = true;
+    }
     const alert = alertFromEvent(event);
     if (!alert) return; // this event is informational only
+    if (alert.kind === 'crash') {
+      // A crash check is the only automatic work that remains relevant. Releasing queued streams
+      // also aborts their network work; the active lower-priority utterance is preempted below.
+      this.queue.removeBelowPriority(alert.priority);
+      if (this.current && this.current.alert.priority < alert.priority) this.current.ctrl.abort();
+    }
     this.queue.enqueue(alert, this.now());
     this.pump();
   }

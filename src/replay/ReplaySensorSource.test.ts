@@ -38,13 +38,13 @@ test('a sustained impact emits exactly one crash candidate', async () => {
   assert.equal(events.length, 1);
   assert.equal(events[0]!.severity, 'critical');
   assert.ok(events[0]!.confidence >= 0 && events[0]!.confidence <= 1);
-  assert.ok(events[0]!.evidence.peakAccelerationG! > 3.5);
+  assert.ok(events[0]!.evidence.peakAccelerationG! > 4.5);
 });
 
 test('repeated rotational motion emits one swerve candidate without overlap flooding', async () => {
   const events = (await processFixture(repeatedSwerveFixture())).filter((event) => event.kind === 'swerve_candidate');
   assert.equal(events.length, 1);
-  assert.ok(events[0]!.evidence.rotationAxisDirectionChanges! >= 3);
+  assert.ok(events[0]!.evidence.rotationAxisDirectionChanges! >= 4);
 });
 
 test('replay routes listener errors to the error callback and can be reused', async () => {

@@ -8,6 +8,7 @@ import hotspotFixture from '../../../fixtures/hotspots/raleigh-demo.json';
 import tileFixture from '../../../fixtures/tiles/demo-route.json';
 import type { VoiceCoordinator } from '../voice/VoiceCoordinator';
 import { DriveSession } from './DriveSession';
+import { DriveEventGate, DriveEventRouter } from './DriveEventGate';
 
 /** Replay never touches the network: the real OpenStreetMap tile is bundled and Overpass is "down". */
 const OFFLINE = {
@@ -21,11 +22,11 @@ export function createReplaySession(
   onEvent?: (event: DriveEvent) => void,
 ): DriveSession {
   const tiles = new TileCache({ client: OFFLINE, bundled: tileFixture as unknown as Record<TileKey, TileContents> });
+  const eventSink = new DriveEventRouter({ gate: new DriveEventGate(), voice, onEvent });
   return new DriveSession({
     coach: new LocationCoach(),
     tiles,
     hotspots: new HotspotIndex(hotspotFixture as unknown as HotspotSnapshot),
-    voice,
-    onEvent,
+    eventSink,
   });
 }

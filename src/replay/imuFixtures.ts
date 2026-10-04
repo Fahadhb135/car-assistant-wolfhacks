@@ -73,7 +73,7 @@ export function repeatedSwerveFixture(options?: FixtureOptions): readonly ImuSam
   return buildFixture((_index, timestampMs) => {
     const phase = Math.floor(timestampMs / 180) % 2 === 0 ? 1 : -1;
     return {
-      accelerationG: Object.freeze({ x: phase > 0 ? 0.65 : 0.08, y: 0, z: 1 }),
+      accelerationG: Object.freeze({ x: phase > 0 ? 1.1 : 0.05, y: 0, z: 1 }),
       angularVelocityDps: Object.freeze({ x: 0, y: 0, z: phase * 65 }),
     };
   }, options);

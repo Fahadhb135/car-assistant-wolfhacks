@@ -9,8 +9,21 @@ import { SlidingWindowBuilder } from './SlidingWindowBuilder';
 import { StreamHealth } from './StreamHealth';
 import { SwerveCandidateDetector } from './SwerveCandidateDetector';
 import { TimeRingBuffer } from './TimeRingBuffer';
-import type { ImuPipelineResult, PartialImuPipelineConfig, StreamHealthSnapshot } from './types';
+import type {
+  ImuArbitrationSnapshot,
+  ImuPipelineResult,
+  PartialImuPipelineConfig,
+  StreamHealthSnapshot,
+} from './types';
 import { toVehicleFrame, type VehicleFrameCalibration } from './VehicleFrame';
+
+const NON_CRASH_PRIORITY: Readonly<Record<ImuEvent['kind'], number>> = Object.freeze({
+  crash_candidate: Number.POSITIVE_INFINITY,
+  hard_braking_candidate: 4,
+  harsh_corner_candidate: 3,
+  rapid_acceleration_candidate: 2,
+  swerve_candidate: 1,
+});
 
 export class ImuPipeline {
   private readonly config;
@@ -22,6 +35,10 @@ export class ImuPipeline {
   private readonly swerveDetector;
   private readonly behaviorDetector;
   private vehicleCalibration?: VehicleFrameCalibration;
+  private lastProcessedAtMs = 0;
+  private lastNonCrashEventAtMs = Number.NEGATIVE_INFINITY;
+  private suppressedCount = 0;
+  private suppressedByKind: Partial<Record<ImuEvent['kind'], number>> = {};
 
   constructor(config: PartialImuPipelineConfig = {}) {
     this.config = resolvePipelineConfig(config);
@@ -54,17 +71,19 @@ export class ImuPipeline {
         completedWindows: Object.freeze([]),
         skippedWindowCount: 0,
         health: this.health.snapshot(),
+        arbitration: this.arbitrationSnapshot(this.lastProcessedAtMs),
       });
     }
 
     this.validator.accept(sample);
     this.health.recordAccepted(sample);
+    this.lastProcessedAtMs = sample.receivedMonotonicMs;
     this.buffer.push(sample);
-    const events: ImuEvent[] = [];
+    const candidates: ImuEvent[] = [];
     const crashEvent = this.crashDetector.process(sample);
-    if (crashEvent) events.push(crashEvent);
+    if (crashEvent) candidates.push(crashEvent);
     if (this.vehicleCalibration) {
-      events.push(...this.behaviorDetector.process(toVehicleFrame(sample, this.vehicleCalibration)));
+      candidates.push(...this.behaviorDetector.process(toVehicleFrame(sample, this.vehicleCalibration)));
     }
 
     const buildResult = this.windows.push(sample);
@@ -72,8 +91,9 @@ export class ImuPipeline {
       extractWindowFeatures(window, this.config.swerve.rotationAxis, this.config.swerve.directionDeadbandDps));
     for (const features of completedWindows) {
       const event = this.swerveDetector.process(features);
-      if (event) events.push(event);
+      if (event) candidates.push(event);
     }
+    const events = this.arbitrate(candidates, sample.receivedMonotonicMs);
 
     return Object.freeze({
       accepted: true,
@@ -81,6 +101,7 @@ export class ImuPipeline {
       completedWindows: Object.freeze(completedWindows),
       skippedWindowCount: buildResult.skippedWindowCount,
       health: this.health.snapshot(),
+      arbitration: this.arbitrationSnapshot(sample.receivedMonotonicMs),
     });
   }
 
@@ -92,6 +113,10 @@ export class ImuPipeline {
     return this.buffer.values();
   }
 
+  getArbitrationState(): ImuArbitrationSnapshot {
+    return this.arbitrationSnapshot(this.lastProcessedAtMs);
+  }
+
   reset(): void {
     this.validator.reset();
     this.health.reset();
@@ -100,5 +125,51 @@ export class ImuPipeline {
     this.crashDetector.reset();
     this.swerveDetector.reset();
     this.behaviorDetector.reset();
+    this.lastProcessedAtMs = 0;
+    this.lastNonCrashEventAtMs = Number.NEGATIVE_INFINITY;
+    this.suppressedCount = 0;
+    this.suppressedByKind = {};
+  }
+
+  private arbitrate(candidates: readonly ImuEvent[], nowMs: number): readonly ImuEvent[] {
+    const crash = candidates.find((event) => event.kind === 'crash_candidate');
+    if (crash) {
+      for (const candidate of candidates) {
+        if (candidate !== crash) this.recordSuppressed(candidate.kind);
+      }
+      return Object.freeze([crash]);
+    }
+    if (candidates.length === 0) return Object.freeze([]);
+
+    const ordered = [...candidates].sort((a, b) =>
+      NON_CRASH_PRIORITY[b.kind] - NON_CRASH_PRIORITY[a.kind]
+      || a.occurredAtMs - b.occurredAtMs);
+    if (nowMs - this.lastNonCrashEventAtMs < this.config.nonCrashMotionCooldownMs) {
+      for (const candidate of ordered) this.recordSuppressed(candidate.kind);
+      return Object.freeze([]);
+    }
+
+    const admitted = ordered[0]!;
+    this.lastNonCrashEventAtMs = nowMs;
+    for (const candidate of ordered.slice(1)) this.recordSuppressed(candidate.kind);
+    return Object.freeze([admitted]);
+  }
+
+  private recordSuppressed(kind: ImuEvent['kind']): void {
+    this.suppressedCount += 1;
+    this.suppressedByKind[kind] = (this.suppressedByKind[kind] ?? 0) + 1;
+  }
+
+  private arbitrationSnapshot(nowMs: number): ImuArbitrationSnapshot {
+    const cooldownUntil = Number.isFinite(this.lastNonCrashEventAtMs)
+      ? this.lastNonCrashEventAtMs + this.config.nonCrashMotionCooldownMs
+      : null;
+    const remaining = cooldownUntil === null ? 0 : Math.max(0, cooldownUntil - nowMs);
+    return Object.freeze({
+      nonCrashCooldownUntilMs: remaining > 0 ? cooldownUntil : null,
+      nonCrashCooldownRemainingMs: remaining,
+      suppressedCount: this.suppressedCount,
+      suppressedByKind: Object.freeze({ ...this.suppressedByKind }),
+    });
   }
 }

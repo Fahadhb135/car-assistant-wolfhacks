@@ -107,6 +107,8 @@ export type DrivingBehaviorConfig = Readonly<{
 
 export type ImuPipelineConfig = Readonly<{
   validation: SampleValidationConfig;
+  /** Global cooldown shared by every non-crash motion candidate. */
+  nonCrashMotionCooldownMs: number;
   bufferRetentionMs: number;
   maximumBufferedSamples: number;
   windows: SlidingWindowConfig;
@@ -117,6 +119,7 @@ export type ImuPipelineConfig = Readonly<{
 
 export type PartialImuPipelineConfig = Readonly<{
   validation?: Partial<SampleValidationConfig>;
+  nonCrashMotionCooldownMs?: number;
   bufferRetentionMs?: number;
   maximumBufferedSamples?: number;
   windows?: Partial<SlidingWindowConfig>;
@@ -130,6 +133,13 @@ export type PartialImuPipelineConfig = Readonly<{
   }>;
 }>;
 
+export type ImuArbitrationSnapshot = Readonly<{
+  nonCrashCooldownUntilMs: number | null;
+  nonCrashCooldownRemainingMs: number;
+  suppressedCount: number;
+  suppressedByKind: Readonly<Partial<Record<ImuEvent['kind'], number>>>;
+}>;
+
 export type ImuPipelineResult =
   | Readonly<{
       accepted: false;
@@ -138,6 +148,7 @@ export type ImuPipelineResult =
       completedWindows: readonly WindowFeatures[];
       skippedWindowCount: number;
       health: StreamHealthSnapshot;
+      arbitration: ImuArbitrationSnapshot;
     }>
   | Readonly<{
       accepted: true;
@@ -145,4 +156,5 @@ export type ImuPipelineResult =
       completedWindows: readonly WindowFeatures[];
       skippedWindowCount: number;
       health: StreamHealthSnapshot;
+      arbitration: ImuArbitrationSnapshot;
     }>;

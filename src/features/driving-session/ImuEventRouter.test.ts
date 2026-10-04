@@ -20,12 +20,10 @@ const swerve: ImuEvent = {
 };
 
 describe('ImuEventRouter', () => {
-  it('stamps, records, and voices candidates on the app-wide event path', () => {
-    const handleEvent = vi.fn();
-    const onEvent = vi.fn();
+  it('stamps and routes candidates through the shared drive event sink', () => {
+    const route = vi.fn(() => true);
     const router = new ImuEventRouter({
-      voice: { handleEvent },
-      onEvent,
+      eventSink: { route },
       nextId: () => 'imu-1',
       wallClockNow: () => 1_700_000_002_000,
     });
@@ -39,14 +37,21 @@ describe('ImuEventRouter', () => {
       confirmed: false,
       t: 1_700_000_002_000,
     });
-    expect(onEvent).toHaveBeenCalledWith(event);
-    expect(handleEvent).toHaveBeenCalledWith(event);
+    expect(route).toHaveBeenCalledWith(event);
+  });
+
+  it('does not return a candidate rejected by the shared gate', () => {
+    const router = new ImuEventRouter({
+      eventSink: { route: () => false },
+      wallClockNow: () => 2_000,
+    });
+    expect(router.route(crash)).toBeUndefined();
   });
 
   it('keeps one monotonic-to-wall-clock offset for the whole drive', () => {
     const times = [10_000, 999_999];
     const router = new ImuEventRouter({
-      voice: { handleEvent: vi.fn() },
+      eventSink: { route: () => true },
       nextId: (() => {
         let id = 0;
         return () => `i${++id}`;
@@ -54,7 +59,7 @@ describe('ImuEventRouter', () => {
       wallClockNow: () => times.shift()!,
     });
 
-    expect(router.route(crash).t).toBe(10_000);
-    expect(router.route(swerve).t).toBe(10_500);
+    expect(router.route(crash)?.t).toBe(10_000);
+    expect(router.route(swerve)?.t).toBe(10_500);
   });
 });

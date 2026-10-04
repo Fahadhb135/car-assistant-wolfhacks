@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { AlertQueue } from './AlertQueue';
 import { alertFromEvent, coachingTipAlert } from './phrases';
 import { ev } from './testing';
+import type { Alert, SpokenStream } from './types';
 
 const stopAhead = (t: number) => alertFromEvent(ev({ kind: 'stop_sign_ahead', severity: 'info', distanceM: 50 }, t))!;
 
@@ -27,6 +28,27 @@ describe('AlertQueue', () => {
     const q = new AlertQueue();
     q.enqueue(stopAhead(0), 0);
     expect(q.next(3500, { allowTips: true })).toBeUndefined();
+  });
+
+  it('releases queued streamed work removed below a crash priority', () => {
+    const q = new AlertQueue();
+    let cancelled = false;
+    const stream: SpokenStream = {
+      segments: (async function* () { yield { text: 'later' }; })(),
+      cancel: () => { cancelled = true; },
+    };
+    const chat: Alert = {
+      id: 'chat',
+      kind: 'chat_reply',
+      priority: 30,
+      utterance: { text: 'fallback', stream },
+      createdAt: 0,
+      ttlMs: 1_000,
+    };
+    q.enqueue(chat, 0);
+    q.removeBelowPriority(100);
+    expect(q.size()).toBe(0);
+    expect(cancelled).toBe(true);
   });
 
   it('withholds tips when not allowed but keeps them queued', () => {

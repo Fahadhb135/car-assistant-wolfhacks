@@ -7,6 +7,15 @@ import { extractWindowFeatures } from './features';
 import { ImuPipeline } from './ImuPipeline';
 import { SlidingWindowBuilder } from './SlidingWindowBuilder';
 import { TimeRingBuffer } from './TimeRingBuffer';
+import type { VehicleFrameCalibration } from './VehicleFrame';
+
+const identityCalibration: VehicleFrameCalibration = {
+  version: 1,
+  forward: { x: 1, y: 0, z: 0 },
+  lateral: { x: 0, y: 1, z: 0 },
+  vertical: { x: 0, y: 0, z: 1 },
+  createdAtEpochMs: 1,
+};
 
 function sample(
   receivedMonotonicMs: number,
@@ -144,6 +153,70 @@ test('reset clears validator, health, buffers, windows, and detectors', () => {
   });
   assert.equal(pipeline.getBufferedSamples().length, 0);
   assert.equal(pipeline.process(sample(0, 0)).accepted, true);
+});
+
+test('crash has same-sample precedence over a calibrated maneuver candidate', () => {
+  const pipeline = new ImuPipeline({
+    nonCrashMotionCooldownMs: 60_000,
+    crash: {
+      triggerAccelerationG: 3,
+      minimumDurationMs: 20,
+      minimumImpulseGSeconds: 10,
+      minimumAngularVelocityDps: 20,
+    },
+    behaviors: {
+      hardBraking: { triggerLongitudinalG: 0.4, minimumDurationMs: 20, minimumJerkGps: 0 },
+    },
+  });
+  pipeline.setVehicleCalibration(identityCalibration);
+  pipeline.process(sample(0, 0));
+  pipeline.process(sample(20, 1, { x: -5, y: 0, z: 1 }, { x: 0, y: 0, z: 50 }));
+  const collision = pipeline.process(sample(40, 2, { x: -5, y: 0, z: 1 }, { x: 0, y: 0, z: 50 }));
+  assert.deepEqual(collision.events.map((event) => event.kind), ['crash_candidate']);
+  assert.equal(collision.arbitration.suppressedByKind.hard_braking_candidate, 1);
+});
+
+test('global non-crash arbitration has deterministic priority and admits at the exact 60s boundary', () => {
+  const pipeline = new ImuPipeline({
+    nonCrashMotionCooldownMs: 60_000,
+    behaviors: {
+      maximumContinuityGapMs: 100,
+      hardBraking: { triggerLongitudinalG: 0.4, minimumDurationMs: 20, minimumJerkGps: 0, cooldownMs: 0 },
+      rapidAcceleration: { triggerLongitudinalG: 0.4, minimumDurationMs: 20, minimumJerkGps: 0, cooldownMs: 0 },
+      harshCornering: {
+        triggerLateralG: 0.4,
+        minimumYawRateDps: 20,
+        minimumDurationMs: 20,
+        cooldownMs: 0,
+      },
+    },
+  });
+  pipeline.setVehicleCalibration(identityCalibration);
+  pipeline.process(sample(0, 0));
+  pipeline.process(sample(20, 1, { x: -0.8, y: 0.8, z: 1 }, { x: 0, y: 0, z: 50 }));
+  const overlap = pipeline.process(sample(40, 2, { x: -0.8, y: 0.8, z: 1 }, { x: 0, y: 0, z: 50 }));
+  assert.deepEqual(overlap.events.map((event) => event.kind), ['hard_braking_candidate']);
+  assert.equal(overlap.arbitration.suppressedByKind.harsh_corner_candidate, 1);
+
+  pipeline.process(sample(60, 3));
+  pipeline.process(sample(80, 4, { x: 0.8, y: 0, z: 1 }));
+  const cooled = pipeline.process(sample(100, 5, { x: 0.8, y: 0, z: 1 }));
+  assert.deepEqual(cooled.events, []);
+  assert.equal(cooled.arbitration.suppressedByKind.rapid_acceleration_candidate, 1);
+
+  // A stream gap clears detector episodes but never bypasses the global monotonic cooldown.
+  pipeline.process(sample(60_000, 6));
+  pipeline.process(sample(60_020, 7, { x: -0.8, y: 0, z: 1 }));
+  const boundary = pipeline.process(sample(60_040, 8, { x: -0.8, y: 0, z: 1 }));
+  assert.deepEqual(boundary.events.map((event) => event.kind), ['hard_braking_candidate']);
+
+  pipeline.reset();
+  assert.deepEqual(pipeline.getArbitrationState(), {
+    nonCrashCooldownUntilMs: null,
+    nonCrashCooldownRemainingMs: 0,
+    suppressedCount: 0,
+    suppressedByKind: {},
+  });
 });
 
 test('pipeline remains bounded during an extended equal-timestamp stream', () => {

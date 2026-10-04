@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { DriveEvent } from '../../core/events/types';
 import { destination, METERS_PER_MILE } from '../../core/location/geo';
 import { RegionPrefetcher } from '../../core/location/regionPrefetch';
@@ -85,10 +85,27 @@ describe('DriveSession', () => {
       coach: { update: () => [] },
       tiles: { update: async () => {}, featuresAhead: () => [], roadsNear: () => [] },
       hotspots: null,
-      voice: { handleEvent: (e) => void events.push(e) },
+      eventSink: { route: (e) => (events.push(e), true) },
     });
     expect(session.onFix({ lat: 1, lon: 1, heading: 0, speed: 5, t: 0 })).toEqual([]);
     expect(events).toEqual([]);
+  });
+
+  it('keeps passive location work running when the shared event gate suppresses coaching', () => {
+    let tileUpdates = 0;
+    const route = vi.fn(() => false);
+    const session = new DriveSession({
+      coach: { update: (fix) => [{ kind: 'stop_sign_ahead', severity: 'info', distanceM: 40, featureId: 1, t: fix.t }] },
+      tiles: {
+        update: async () => { tileUpdates += 1; },
+        featuresAhead: () => [],
+        roadsNear: () => [],
+      },
+      eventSink: { route },
+    });
+    expect(session.onFix({ lat: 1, lon: 1, heading: 0, speed: 5, t: 10 })).toEqual([]);
+    expect(tileUpdates).toBe(1);
+    expect(route).toHaveBeenCalledTimes(1);
   });
 
   it('never waits on the network: a slow tile load does not delay or reorder events', () => {
@@ -97,7 +114,7 @@ describe('DriveSession', () => {
     const session = new DriveSession({
       coach: { update: (fix) => (order.push(fix.t), []) },
       tiles: { update: () => (loads++, new Promise<void>(() => {})), featuresAhead: () => [], roadsNear: () => [] }, // Overpass hangs
-      voice: { handleEvent() {} },
+      eventSink: { route: () => true },
     });
     for (let t = 0; t < 3; t++) session.onFix({ lat: 1, lon: 1, heading: 0, speed: 5, t });
     expect(order).toEqual([0, 1, 2]); // processed immediately, in order, despite the hung fetch
@@ -109,7 +126,7 @@ describe('DriveSession', () => {
     const session = new DriveSession({
       coach: { update: () => [] },
       tiles: { update: () => Promise.reject(new Error('overpass down')), featuresAhead: () => [], roadsNear: () => [] },
-      voice: { handleEvent() {} },
+      eventSink: { route: () => true },
       onError: (e) => errors.push(e),
     });
     session.onFix({ lat: 1, lon: 1, heading: 0, speed: 5, t: 0 });
@@ -160,7 +177,7 @@ describe('live map region', () => {
         prefetch: async (keys) => void prefetched.push([...keys]),
       },
       region: new RegionPrefetcher(),
-      voice: { handleEvent: () => {} },
+      eventSink: { route: () => true },
     });
     const start = { lat: 35.769326, lon: -78.676307 };
     const fix = (p: { lat: number; lon: number }) => ({ ...p, t: 0, speed: 10, heading: 90 });
