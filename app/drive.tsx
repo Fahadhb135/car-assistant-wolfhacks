@@ -16,6 +16,7 @@ import { useCoachChat, type CoachChatApi } from '@/features/driving-session/useC
 import { useDriveVoice } from '@/features/driving-session/useDriveVoice';
 import { useLiveImuDrive } from '@/features/driving-session/useLiveImuDrive';
 import { SpeedBadge } from '@/features/driving-session/SpeedBadge';
+import { useDevEventFeed } from '@/features/driving-session/useDevEventFeed';
 import { TuningPanel } from '@/features/driving-session/TuningPanel';
 import { useLiveLocation, type LiveLocationStatus } from '@/features/driving-session/useLiveLocation';
 import { useReplayDrive } from '@/features/driving-session/useReplayDrive';
@@ -74,6 +75,7 @@ export default function DriveRoute() {
   );
   const replay = useReplayDrive(replayMode, voice, (fix) => driveContext.updateFix(fix));
   const live = useLiveImuDrive(!replayMode, deviceId, voice);
+  useDevEventFeed(!replayMode, live.eventSink);
   const [tuneOpen, setTuneOpen] = useState(false);
   const location = useLiveLocation(!replayMode, live.eventSink, (fix, limitMps, road) =>
     driveContext.updateFix(fix, limitMps, road));
