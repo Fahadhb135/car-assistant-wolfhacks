@@ -15,6 +15,7 @@ import {
 import { useCoachChat, type CoachChatApi } from '@/features/driving-session/useCoachChat';
 import { useDriveVoice } from '@/features/driving-session/useDriveVoice';
 import { useLiveImuDrive } from '@/features/driving-session/useLiveImuDrive';
+import { useLiveLocation, type LiveLocationStatus } from '@/features/driving-session/useLiveLocation';
 import { useReplayDrive } from '@/features/driving-session/useReplayDrive';
 import { POLICIES } from '@/features/voice/phrases';
 import { buildCloudTrip } from '@/integrations/backend/tripUpload';
@@ -26,6 +27,15 @@ const TONE_BACKGROUND: Record<CoachMessage['tone'], string> = {
   info: colors.mint,
   warn: colors.amberSoft,
   urgent: '#F6D5D5',
+};
+
+const LOCATION_LABEL: Record<LiveLocationStatus, string> = {
+  idle: 'Off',
+  requesting: 'Starting…',
+  denied: 'No permission',
+  waiting: 'Finding GPS…',
+  tracking: 'Tracking',
+  error: 'Error',
 };
 
 function formatTime(totalSeconds: number) {
@@ -52,6 +62,7 @@ export default function DriveRoute() {
   );
   const replay = useReplayDrive(replayMode, voice);
   const live = useLiveImuDrive(!replayMode, deviceId, voice);
+  const location = useLiveLocation(!replayMode, voice, live.recordEvent);
   const getEvents = useCallback(
     () => (replayMode ? replay.eventsRef.current : live.eventsRef.current),
     [live.eventsRef, replay.eventsRef, replayMode],
@@ -133,6 +144,11 @@ export default function DriveRoute() {
         {live.error && !replayMode ? (
           <Text variant="bodySmall" style={styles.sensorError}>{live.error}</Text>
         ) : null}
+        {location.status === 'denied' && !replayMode ? (
+          <Text variant="bodySmall" style={styles.sensorError}>
+            Location is off, so stop sign, traffic light and highway coaching is unavailable. Allow location for Car Assistant in Settings.
+          </Text>
+        ) : null}
 
         <CoachChatBar chat={chat} />
 
@@ -148,7 +164,9 @@ export default function DriveRoute() {
             <View style={styles.okDot} />
             <View>
               <Text variant="labelMedium" style={styles.signalLabel}>LOCATION</Text>
-              <Text variant="bodyMedium" style={styles.signalValue}>Tracking</Text>
+              <Text variant="bodyMedium" style={styles.signalValue}>
+                {replayMode ? 'Replay' : location.mapError && location.status === 'tracking' ? 'Map offline' : LOCATION_LABEL[location.status]}
+              </Text>
             </View>
           </View>
           <View style={styles.signalItem}>
