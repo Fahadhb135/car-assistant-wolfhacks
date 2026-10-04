@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Button, Card, Divider, Surface, Text } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,19 +14,12 @@ import {
 import {
   BarChart, EmptyState, FreshnessNote, KpiTile, ParentHeader, RangeTabs, ResourceView, parentStyles as s,
 } from '@/features/parent-dashboard/ParentUi';
-import { clearParentSession, getParentSession } from '@/features/parent-dashboard/parentSession';
-import { currentParentSession, useParentResource } from '@/features/parent-dashboard/useParentResource';
+import { currentSession, useParentResource } from '@/features/parent-dashboard/useParentResource';
 
 const PAGE = 10;
 
-export default function ParentDashboardRoute() {
+export default function DashboardRoute() {
   const [range, setRange] = useState<ParentRange>('30d');
-  const linked = getParentSession();
-
-  useEffect(() => {
-    if (!getParentSession()) router.replace('/parent/link');
-  }, []);
-
   const summary = useParentResource(`summary:${range}`, (session) => fetchSummary(session, range));
   const trends = useParentResource(`trends:${range}`, (session) => fetchTrends(session, range));
   const firstPage = useParentResource('trips:first', (session) => fetchTrips(session, { limit: PAGE }));
@@ -41,7 +34,7 @@ export default function ParentDashboardRoute() {
   };
 
   async function loadMore(before: number): Promise<void> {
-    const session = currentParentSession();
+    const session = currentSession();
     if (!session) return;
     setLoadingMore(true);
     const page = await fetchTrips(session, { limit: PAGE, before });
@@ -49,18 +42,15 @@ export default function ParentDashboardRoute() {
     if (page.ok) setMore((prev) => ({ trips: [...(prev?.trips ?? []), ...page.data.trips], nextBefore: page.data.nextBefore }));
   }
 
-  if (!linked) return null;
   const now = Date.now();
 
   return (
     <SafeAreaView style={s.safeArea}>
       <ScrollView contentContainerStyle={s.container} showsVerticalScrollIndicator={false}>
-        <ParentHeader title="PARENT VIEW" back={null} />
+        <ParentHeader title="DASHBOARD" back={null} />
         <View style={{ gap: 4 }}>
           <Text variant="headlineMedium" style={s.sectionTitle}>How the drives are going</Text>
-          <Text variant="bodyMedium" style={s.muted}>
-            {linked.shareLocation ? 'Locations are shared with you.' : 'Locations stay private; you see roads and times only.'}
-          </Text>
+          <Text variant="bodyMedium" style={s.muted}>Past drives, scores and speeding. Roads and times only, never GPS positions.</Text>
         </View>
 
         <RangeTabs value={range} onChange={setRange} />
@@ -101,7 +91,7 @@ export default function ParentDashboardRoute() {
                     )}
                     {d.crashCandidates > 0 ? (
                       <Text variant="bodyMedium" style={s.muted}>
-                        {d.crashCandidates} {d.crashCandidates === 1 ? 'drive' : 'drives'} had a confirmed crash. Check in with them.
+                        {d.crashCandidates} {d.crashCandidates === 1 ? 'drive' : 'drives'} had a confirmed crash.
                       </Text>
                     ) : null}
                   </Surface>
@@ -176,19 +166,6 @@ export default function ParentDashboardRoute() {
             );
           }}
         </ResourceView>
-
-        <Button
-          compact
-          mode="text"
-          textColor="#647269"
-          icon="link-off"
-          onPress={() => {
-            clearParentSession();
-            router.replace('/');
-          }}
-        >
-          Unlink this phone
-        </Button>
       </ScrollView>
     </SafeAreaView>
   );

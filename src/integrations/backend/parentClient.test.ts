@@ -1,18 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  createShareCode,
   fetchSpeeding,
   fetchSummary,
   fetchTrip,
   fetchTrips,
-  linkWithCode,
   parseSpeeding,
   parseSummary,
   parseTrends,
   parseTripDetail,
   parseTripPage,
-  revokeParents,
 } from './parentClient';
 
 const FRESH = { source: 'local', generatedAt: 1_000 };
@@ -26,7 +23,7 @@ function reply(status: number, body?: unknown): typeof fetch {
   return vi.fn().mockResolvedValue({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as typeof fetch;
 }
 
-const session = (fetchImpl: typeof fetch) => ({ baseUrl: 'http://cloud/', token: 'tok', fetchImpl });
+const session = (fetchImpl: typeof fetch) => ({ baseUrl: 'http://cloud/', driverId: 'maya', fetchImpl });
 
 describe('parsers never trust the network', () => {
   it('reads a good summary and rejects one with no freshness, range or trip count', () => {
@@ -82,27 +79,34 @@ describe('parsers never trust the network', () => {
 });
 
 describe('requests', () => {
-  it('sends the token as a bearer header, never in the URL, and trims the base url', async () => {
+  const urlOf = (f: typeof fetch) => (f as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+
+  it('asks for this phone’s driver, with no credentials, and trims the base url', async () => {
     const f = reply(200, SUMMARY);
     const result = await fetchSummary(session(f), '7d');
     expect(result.ok).toBe(true);
-    const [url, init] = (f as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('http://cloud/parent/summary?range=7d');
-    expect(url).not.toContain('tok');
-    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+    expect(urlOf(f)).toBe('http://cloud/drivers/maya/summary?range=7d');
+    const init = (f as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit;
+    expect(init.headers).toBeUndefined();
   });
 
-  it('pages trips with a cursor and encodes ids', async () => {
+  it('encodes the driver id and trip id', async () => {
+    const f = reply(404);
+    await fetchTrip({ baseUrl: 'http://cloud', driverId: 'anon 1/x', fetchImpl: f }, 'a/b c');
+    expect(urlOf(f)).toBe('http://cloud/drivers/anon%201%2Fx/trips/a%2Fb%20c');
+  });
+
+  it('pages trips with a cursor, and limit 1 is the home screen’s last drive', async () => {
     const f = reply(200, { ...FRESH, trips: [], nextBefore: null });
     await fetchTrips(session(f), { limit: 5, before: 42 });
-    expect((f as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('http://cloud/parent/trips?limit=5&before=42');
-    const g = reply(404);
-    await fetchTrip(session(g), 'a/b c');
-    expect((g as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('http://cloud/parent/trips/a%2Fb%20c');
+    expect(urlOf(f)).toBe('http://cloud/drivers/maya/trips?limit=5&before=42');
+    const g = reply(200, { ...FRESH, trips: [{ tripId: 'last', start: 1_000, end: 61_000, smoothness: 88 }], nextBefore: null });
+    const last = await fetchTrips(session(g), { limit: 1 });
+    expect(urlOf(g)).toBe('http://cloud/drivers/maya/trips?limit=1');
+    expect(last.ok && last.data.trips[0]).toMatchObject({ tripId: 'last', smoothness: 88 });
   });
 
   it('maps failures so the screen can say the right thing', async () => {
-    expect(await fetchSummary(session(reply(401)), '30d')).toEqual({ ok: false, reason: 'unauthorized' });
     expect(await fetchSummary(session(reply(500)), '30d')).toEqual({ ok: false, reason: 'bad-response' });
     expect(await fetchSummary(session(reply(200, { nonsense: true })), '30d')).toEqual({ ok: false, reason: 'bad-response' });
     expect(await fetchTrip(session(reply(404)), 'x')).toEqual({ ok: false, reason: 'not-found' });
@@ -110,40 +114,5 @@ describe('requests', () => {
     expect(await fetchSpeeding(session(down), 'all')).toEqual({ ok: false, reason: 'offline' });
     const badJson = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => { throw new Error('not json'); } }) as unknown as typeof fetch;
     expect(await fetchSummary(session(badJson), '30d')).toEqual({ ok: false, reason: 'bad-response' });
-  });
-});
-
-describe('linking and sharing', () => {
-  it('links with a code and returns the token', async () => {
-    const f = reply(200, { viewerToken: 'secret', driverId: 'maya', shareLocation: true });
-    const r = await linkWithCode({ baseUrl: 'http://cloud', code: '123456', fetchImpl: f });
-    expect(r).toEqual({ ok: true, data: { token: 'secret', driverId: 'maya', shareLocation: true } });
-    const [url, init] = (f as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('http://cloud/parent/link');
-    expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body as string)).toEqual({ code: '123456' });
-    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
-  });
-
-  it('tells a wrong or expired code from a rate limit and a bad reply', async () => {
-    const link = (f: typeof fetch) => linkWithCode({ baseUrl: 'http://cloud', code: '123456', fetchImpl: f });
-    expect(await link(reply(404))).toEqual({ ok: false, reason: 'invalid-code' });
-    expect(await link(reply(429))).toEqual({ ok: false, reason: 'rate-limited' });
-    expect(await link(reply(200, { driverId: 'maya' }))).toEqual({ ok: false, reason: 'bad-response' });
-  });
-
-  it('creates a share code for the driver, location off unless asked', async () => {
-    const f = reply(200, { code: '654321', expiresAt: 9, shareLocation: false });
-    const r = await createShareCode({ baseUrl: 'http://cloud', driverId: 'anon 1', shareLocation: false, fetchImpl: f });
-    expect(r).toEqual({ ok: true, data: { code: '654321', expiresAt: 9 } });
-    const [url, init] = (f as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('http://cloud/drivers/anon%201/share-code');
-    expect(JSON.parse(init.body as string)).toEqual({ shareLocation: false });
-  });
-
-  it('revokes parents', async () => {
-    const f = reply(200, { revoked: 2 });
-    expect(await revokeParents({ baseUrl: 'http://cloud', driverId: 'maya', fetchImpl: f })).toEqual({ ok: true, data: { revoked: 2 } });
-    expect(((f as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit])[1].method).toBe('DELETE');
   });
 });

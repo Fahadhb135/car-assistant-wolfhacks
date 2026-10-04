@@ -92,7 +92,17 @@ export function trendSentence(trend: Trend, first: number | null, recent: number
   return `Steady around ${Math.round(recent)}.`;
 }
 
-/** What "over by" means for a parent: the coach alerts at 5 mph over, so that is the floor. */
+/** One line on how a drive went, from the numbers the service holds. */
+export function driveVerdict(t: { nBadEvents: number; speedingCount: number; hadCrash: boolean }): { text: string; good: boolean } {
+  if (t.hadCrash) return { text: 'Crash confirmed', good: false };
+  const parts = [
+    t.nBadEvents ? `${t.nBadEvents} ${t.nBadEvents === 1 ? 'thing' : 'things'} to work on` : null,
+    t.speedingCount ? `${t.speedingCount} speeding ${t.speedingCount === 1 ? 'alert' : 'alerts'}` : null,
+  ].filter(Boolean);
+  return parts.length ? { text: parts.join(' · '), good: false } : { text: 'Smooth and attentive', good: true };
+}
+
+/** What "over by" means on screen: the coach alerts at 5 mph over, so that is the floor. */
 export function formatOverBy(overByMph: number | null): string {
   return overByMph === null ? 'Speed not recorded' : `${Math.round(overByMph)} mph over`;
 }
