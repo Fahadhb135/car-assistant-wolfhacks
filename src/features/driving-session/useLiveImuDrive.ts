@@ -29,6 +29,8 @@ type Runtime = {
 };
 
 const CALM_AFTER_MS = 8_000;
+/** How often a dev build logs the smoothed motion peaks to Metro, for tuning the thresholds. */
+const MOTION_LOG_INTERVAL_MS = 2_000;
 
 async function dispose(runtime: Runtime): Promise<void> {
   if (runtime.disposed) return;
@@ -178,9 +180,21 @@ export function useLiveImuDrive(
         const eventRouter = new ImuEventRouter({ eventSink });
 
         setStatus('starting');
+        let nextMotionLogAtMs = 0;
         await source.start(
           (sample) => {
             const result = pipeline.process(sample);
+            if (__DEV__ && sample.receivedMonotonicMs >= nextMotionLogAtMs) {
+              nextMotionLogAtMs = sample.receivedMonotonicMs + MOTION_LOG_INTERVAL_MS;
+              const peaks = pipeline.takeMotionPeaks();
+              if (peaks) {
+                console.log(
+                  `[imu] fwd ${peaks.minimumForwardG.toFixed(2)}..${peaks.maximumForwardG.toFixed(2)} g, `
+                  + `lat ${peaks.maximumLateralG.toFixed(2)} g, yaw ${peaks.maximumYawDps.toFixed(0)}°/s, `
+                  + `jerk ${peaks.maximumJerkGps.toFixed(2)} g/s`,
+                );
+              }
+            }
             if (result.accepted) {
               const collector = runtime.calibrationCollector;
               if (collector) {
@@ -199,7 +213,10 @@ export function useLiveImuDrive(
                 }
               }
             }
-            for (const candidate of result.events) eventRouter.route(candidate);
+            for (const candidate of result.events) {
+              if (__DEV__) console.log(`[imu] ${candidate.kind}`, JSON.stringify(candidate.evidence));
+              eventRouter.route(candidate);
+            }
           },
           (sourceError) => {
             setError(sourceError.message);

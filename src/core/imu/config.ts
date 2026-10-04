@@ -5,7 +5,7 @@ export const DEFAULT_IMU_PIPELINE_CONFIG: ImuPipelineConfig = Object.freeze({
     maximumAbsoluteAccelerationG: 32,
     maximumAbsoluteAngularVelocityDps: 4_000,
   }),
-  nonCrashMotionCooldownMs: 60_000,
+  nonCrashMotionCooldownMs: 15_000,
   bufferRetentionMs: 10_000,
   maximumBufferedSamples: 2_000,
   windows: Object.freeze({
@@ -34,13 +34,24 @@ export const DEFAULT_IMU_PIPELINE_CONFIG: ImuPipelineConfig = Object.freeze({
     releaseDirectionChanges: 1,
     cooldownMs: 10_000,
   }),
+  // Behavior thresholds apply to a low-pass-filtered vehicle-frame signal (see smoothing), so
+  // sensor noise and road vibration no longer count as jerk or as a corner.
   behaviors: Object.freeze({
     maximumContinuityGapMs: 100,
+    smoothingTimeConstantMs: 100,
+    // A car's tyres top out near 1 g of braking; anything beyond that, sustained, means a collision.
+    severeDeceleration: Object.freeze({
+      triggerLongitudinalG: 1.2,
+      releaseLongitudinalG: 0.6,
+      minimumDurationMs: 120,
+      cooldownMs: 10_000,
+    }),
+    // Firm braking: decelerating at ≥ 0.35 g, entered with a jerk of ≥ 1 g/s (about 10 m/s³).
     hardBraking: Object.freeze({
-      triggerLongitudinalG: 0.45,
-      releaseLongitudinalG: 0.2,
-      minimumDurationMs: 400,
-      minimumJerkGps: 0.75,
+      triggerLongitudinalG: 0.35,
+      releaseLongitudinalG: 0.15,
+      minimumDurationMs: 250,
+      minimumJerkGps: 1,
       cooldownMs: 10_000,
     }),
     rapidAcceleration: Object.freeze({
@@ -50,12 +61,13 @@ export const DEFAULT_IMU_PIPELINE_CONFIG: ImuPipelineConfig = Object.freeze({
       minimumJerkGps: 0.6,
       cooldownMs: 10_000,
     }),
+    // A brisk 90° turn at 15 mph pulls about 0.4 g at 35°/s; a gentle one stays under 0.25 g.
     harshCornering: Object.freeze({
-      triggerLateralG: 0.5,
-      releaseLateralG: 0.22,
-      minimumYawRateDps: 28,
-      releaseYawRateDps: 10,
-      minimumDurationMs: 450,
+      triggerLateralG: 0.3,
+      releaseLateralG: 0.15,
+      minimumYawRateDps: 15,
+      releaseYawRateDps: 6,
+      minimumDurationMs: 300,
       cooldownMs: 10_000,
     }),
   }),
@@ -77,6 +89,9 @@ export function resolvePipelineConfig(partial: PartialImuPipelineConfig = {}): I
     behaviors: {
       maximumContinuityGapMs: partial.behaviors?.maximumContinuityGapMs
         ?? DEFAULT_IMU_PIPELINE_CONFIG.behaviors.maximumContinuityGapMs,
+      smoothingTimeConstantMs: partial.behaviors?.smoothingTimeConstantMs
+        ?? DEFAULT_IMU_PIPELINE_CONFIG.behaviors.smoothingTimeConstantMs,
+      severeDeceleration: { ...DEFAULT_IMU_PIPELINE_CONFIG.behaviors.severeDeceleration, ...partial.behaviors?.severeDeceleration },
       hardBraking: { ...DEFAULT_IMU_PIPELINE_CONFIG.behaviors.hardBraking, ...partial.behaviors?.hardBraking },
       rapidAcceleration: { ...DEFAULT_IMU_PIPELINE_CONFIG.behaviors.rapidAcceleration, ...partial.behaviors?.rapidAcceleration },
       harshCornering: { ...DEFAULT_IMU_PIPELINE_CONFIG.behaviors.harshCornering, ...partial.behaviors?.harshCornering },
@@ -112,6 +127,19 @@ export function resolvePipelineConfig(partial: PartialImuPipelineConfig = {}): I
   if (config.swerve.maximumMissingSampleRatio < 0 || config.swerve.maximumMissingSampleRatio > 1) throw new Error('maximumMissingSampleRatio must be between 0 and 1');
   if (config.swerve.cooldownMs < 0) throw new Error('swerve cooldownMs must be non-negative');
   positive(config.behaviors.maximumContinuityGapMs, 'behavior maximumContinuityGapMs');
+  if (!Number.isFinite(config.behaviors.smoothingTimeConstantMs) || config.behaviors.smoothingTimeConstantMs < 0) {
+    throw new Error('smoothingTimeConstantMs must be finite and non-negative');
+  }
+  const severe = config.behaviors.severeDeceleration;
+  positive(severe.triggerLongitudinalG, 'severeDeceleration triggerLongitudinalG');
+  if (severe.releaseLongitudinalG < 0 || severe.releaseLongitudinalG >= severe.triggerLongitudinalG) {
+    throw new Error('severeDeceleration releaseLongitudinalG must be non-negative and below its trigger');
+  }
+  if (severe.triggerLongitudinalG <= config.behaviors.hardBraking.triggerLongitudinalG) {
+    throw new Error('severeDeceleration must trigger above hard braking');
+  }
+  positive(severe.minimumDurationMs, 'severeDeceleration minimumDurationMs');
+  if (severe.cooldownMs < 0) throw new Error('severeDeceleration cooldownMs must be non-negative');
   for (const [name, behavior] of [
     ['hardBraking', config.behaviors.hardBraking],
     ['rapidAcceleration', config.behaviors.rapidAcceleration],

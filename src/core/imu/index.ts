@@ -1,6 +1,6 @@
 export { DEFAULT_IMU_PIPELINE_CONFIG, resolvePipelineConfig } from './config';
 export { CrashCandidateDetector } from './CrashCandidateDetector';
-export { DrivingBehaviorDetector } from './DrivingBehaviorDetector';
+export { DrivingBehaviorDetector, type MotionPeaks } from './DrivingBehaviorDetector';
 export { extractWindowFeatures } from './features';
 export { ImuPipeline } from './ImuPipeline';
 export { SampleValidator } from './sampleValidation';

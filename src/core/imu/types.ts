@@ -98,8 +98,19 @@ export type HarshCorneringConfig = Readonly<{
   cooldownMs: number;
 }>;
 
+/** Sustained deceleration beyond what tyres can deliver: the car hit something. */
+export type SevereDecelerationConfig = Readonly<{
+  triggerLongitudinalG: number;
+  releaseLongitudinalG: number;
+  minimumDurationMs: number;
+  cooldownMs: number;
+}>;
+
 export type DrivingBehaviorConfig = Readonly<{
   maximumContinuityGapMs: number;
+  /** Time constant of the low-pass filter applied before every behavior threshold and jerk. */
+  smoothingTimeConstantMs: number;
+  severeDeceleration: SevereDecelerationConfig;
   hardBraking: LongitudinalBehaviorConfig;
   rapidAcceleration: LongitudinalBehaviorConfig;
   harshCornering: HarshCorneringConfig;
@@ -127,6 +138,8 @@ export type PartialImuPipelineConfig = Readonly<{
   swerve?: Partial<SwerveDetectorConfig>;
   behaviors?: Readonly<{
     maximumContinuityGapMs?: number;
+    smoothingTimeConstantMs?: number;
+    severeDeceleration?: Partial<SevereDecelerationConfig>;
     hardBraking?: Partial<LongitudinalBehaviorConfig>;
     rapidAcceleration?: Partial<LongitudinalBehaviorConfig>;
     harshCornering?: Partial<HarshCorneringConfig>;

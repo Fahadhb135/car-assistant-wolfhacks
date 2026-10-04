@@ -82,13 +82,65 @@ test('detects hard braking, rapid acceleration, and harsh cornering once per man
 
   const corner = run({ x: 0, y: 0.7, z: 1 }, { x: 0, y: 0, z: 45 });
   assert.deepEqual(corner.map((event) => event.kind), ['harsh_corner_candidate']);
-  assert.ok(corner[0]!.evidence.peakRotationDps >= 45);
+  assert.ok(corner[0]!.evidence.peakRotationDps >= 30); // smoothed toward the 45°/s input
 });
 
-test('rejects ordinary stops, starts, and turns below the conservative defaults', () => {
-  assert.deepEqual(run({ x: -0.35, y: 0, z: 1 }), []);
+test('rejects ordinary stops, starts, and gentle turns', () => {
+  assert.deepEqual(run({ x: -0.25, y: 0, z: 1 }), []);
   assert.deepEqual(run({ x: 0.3, y: 0, z: 1 }), []);
-  assert.deepEqual(run({ x: 0, y: 0.4, z: 1 }, { x: 0, y: 0, z: 22 }), []);
+  assert.deepEqual(run({ x: 0, y: 0.2, z: 1 }, { x: 0, y: 0, z: 12 }), []);
+});
+
+/** Feeds a 120 Hz stream whose forward/lateral/yaw values come from `at(ms)`. */
+function stream(durationMs: number, at: (ms: number, index: number) => { x: number; y: number; yaw: number }) {
+  const detector = new DrivingBehaviorDetector(DEFAULT_IMU_PIPELINE_CONFIG.behaviors);
+  const events = [];
+  for (let index = 0, time = 0; time <= durationMs; index++, time = (index * 1_000) / 120) {
+    const { x, y, yaw } = at(time, index);
+    events.push(...detector.process(toVehicleFrame(sample(time, { x, y, z: 1 }, { x: 0, y: 0, z: yaw }), identity)));
+  }
+  return { events, detector };
+}
+
+test('calls drastic slowing a possible crash rather than firm braking', () => {
+  const { events } = stream(600, (ms) => ({ x: ms < 100 ? 0 : -1.8, y: 0, yaw: 0 }));
+  const crash = events.find((event) => event.kind === 'crash_candidate');
+  assert.ok(crash, 'a sustained 1.8 g deceleration is beyond any brakes');
+  assert.equal(crash.severity, 'critical');
+  assert.ok(crash.evidence.peakAccelerationG >= 1.2);
+});
+
+test('firm braking needs a jerky onset, not just a high deceleration', () => {
+  // Easing into 0.5 g over two seconds (0.25 g/s) is smooth driving.
+  const gradual = stream(3_000, (ms) => ({ x: -Math.min(0.5, ms / 4_000), y: 0, yaw: 0 }));
+  assert.deepEqual(gradual.events, []);
+  // Stamping on the brakes: 0.5 g within 200 ms (2.5 g/s).
+  const stamp = stream(1_500, (ms) => ({ x: -Math.min(0.5, ms / 400), y: 0, yaw: 0 }));
+  assert.deepEqual(stamp.events.map((event) => event.kind), ['hard_braking_candidate']);
+  assert.ok(stamp.events[0]!.evidence.peakJerkGps >= 1);
+});
+
+test('vibration around a normal slowdown is neither jerk nor braking', () => {
+  const { events } = stream(2_000, (_ms, index) => ({ x: -0.25 + (index % 2 ? 0.12 : -0.12), y: 0, yaw: 0 }));
+  assert.deepEqual(events, []);
+});
+
+test('detects a sharp turn even when road vibration dips each sample below release', () => {
+  const { events } = stream(1_500, (ms, index) => ({
+    x: 0,
+    y: ms < 100 ? 0 : 0.4 + (index % 2 ? 0.28 : -0.28),
+    yaw: ms < 100 ? 0 : 30,
+  }));
+  assert.deepEqual(events.map((event) => event.kind), ['harsh_corner_candidate']);
+});
+
+test('reports smoothed motion peaks since the last read', () => {
+  const { detector } = stream(1_000, (ms) => ({ x: ms < 500 ? 0 : -0.3, y: 0.1, yaw: 5 }));
+  const peaks = detector.takeMotionPeaks();
+  assert.ok(peaks);
+  assert.ok(peaks.minimumForwardG < -0.25 && peaks.minimumForwardG >= -0.3);
+  assert.ok(Math.abs(peaks.maximumLateralG - 0.1) < 1e-9);
+  assert.equal(detector.takeMotionPeaks(), undefined);
 });
 
 test('does not call an isolated road bump a driving behavior', () => {

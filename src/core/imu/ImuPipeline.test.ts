@@ -181,6 +181,7 @@ test('global non-crash arbitration has deterministic priority and admits at the 
     nonCrashMotionCooldownMs: 60_000,
     behaviors: {
       maximumContinuityGapMs: 100,
+      smoothingTimeConstantMs: 0, // instant steps: this test is about arbitration, not filtering
       hardBraking: { triggerLongitudinalG: 0.4, minimumDurationMs: 20, minimumJerkGps: 0, cooldownMs: 0 },
       rapidAcceleration: { triggerLongitudinalG: 0.4, minimumDurationMs: 20, minimumJerkGps: 0, cooldownMs: 0 },
       harshCornering: {

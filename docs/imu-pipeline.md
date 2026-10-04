@@ -33,7 +33,7 @@ Window creation has a maximum catch-up count per input. After an extreme timesta
 
 The crash detector tracks acceleration magnitude, time above the trigger, excess-acceleration impulse, and peak angular velocity. Hysteresis and cooldown suppress duplicate events. A configurable continuity limit resets an impact episode across a data gap, so duration and impulse never integrate across unobserved time.
 
-Crash has absolute same-sample precedence. When multiple non-crash detectors emit together, the pipeline keeps exactly one in this deterministic order: hard braking, harsh cornering, rapid acceleration, then swerve. A global monotonic 60-second cooldown then permits at most one non-crash IMU candidate per minute (the exact 60-second boundary is admitted). A stream gap does not bypass that cooldown. `result.arbitration` and `getArbitrationState()` expose cooldown time plus total/per-kind suppression counts; `reset()` clears them.
+Crash has absolute same-sample precedence. When multiple non-crash detectors emit together, the pipeline keeps exactly one in this deterministic order: hard braking, harsh cornering, rapid acceleration, then swerve. A global monotonic 15-second cooldown then permits at most one non-crash IMU candidate per 15 seconds (the exact boundary is admitted). A stream gap does not bypass that cooldown. `result.arbitration` and `getArbitrationState()` expose cooldown time plus total/per-kind suppression counts; `reset()` clears them.
 
 Window features currently include acceleration and angular-velocity magnitude statistics, jerk, sample count, observed duration, sequence-based missing ratio, and direction changes/variation on a configured raw sensor rotation axis. The swerve heuristic uses those features with hysteresis and cooldown.
 
@@ -43,19 +43,29 @@ Hardware decoding still produces raw `sensor`-frame values. For a new SensorTile
 
 Calibration is rejected when the sample contains excessive acceleration variation, rotation, too few samples, or a degenerate orientation. Crash and raw-axis swerve processing continue, but hard-braking, rapid-acceleration, and harsh-corner candidates remain disabled until calibration succeeds.
 
-The behavior detectors use configurable trigger/release hysteresis, minimum duration, continuity gaps, and cooldowns. Longitudinal candidates also require a jerk transition. Cornering requires both lateral acceleration and yaw-rate evidence, which prevents an isolated vertical road bump from being called a corner. Evidence includes duration, peak acceleration, jerk, and rotation for tuning.
+The behavior detectors first low-pass filter the vehicle-frame forward, lateral, and yaw signals (100 ms time constant). At 120 Hz the raw sample-to-sample difference is mostly sensor noise and engine vibration: unfiltered, noise alone exceeded the jerk gate and vibration kept breaking corner episodes apart. They then use configurable trigger/release hysteresis, minimum duration, continuity gaps, and cooldowns. Longitudinal candidates also require a jerk transition, counted from the release level so the onset of the maneuver is included. Cornering requires both lateral acceleration and yaw-rate evidence, which prevents an isolated vertical road bump from being called a corner. Evidence includes duration, peak acceleration, jerk, and rotation for tuning.
 
-### Conservative defaults
+### Defaults
 
 | Detector | Trigger evidence | Sustained duration / quality |
 |---|---|---|
-| Possible crash | acceleration magnitude ≥ 4.5 g and peak rotation ≥ 35°/s | ≥ 80 ms or ≥ 0.16 g·s excess impulse; 100 ms maximum continuity gap |
+| Possible crash (impact) | acceleration magnitude ≥ 4.5 g and peak rotation ≥ 35°/s | ≥ 80 ms or ≥ 0.16 g·s excess impulse; 100 ms maximum continuity gap |
+| Possible crash (drastic slowing, calibrated) | smoothed forward acceleration ≤ -1.2 g, beyond what tyres can brake; release at -0.6 g | ≥ 120 ms |
 | Swerve | ≥ 4 direction changes, rotation-axis SD ≥ 35°/s, acceleration-magnitude SD ≥ 0.18 g | ≥ 40 samples, ≤ 15% missing samples |
-| Hard braking | forward acceleration ≤ -0.45 g; release at -0.20 g | ≥ 400 ms and jerk ≥ 0.75 g/s |
+| Firm braking | smoothed forward acceleration ≤ -0.35 g; release at -0.15 g | ≥ 250 ms and jerk ≥ 1 g/s (about 10 m/s³) |
 | Rapid acceleration | forward acceleration ≥ 0.40 g; release at 0.18 g | ≥ 500 ms and jerk ≥ 0.60 g/s |
-| Harsh cornering | lateral acceleration ≥ 0.50 g and yaw ≥ 28°/s | ≥ 450 ms; release below 0.22 g or 10°/s |
+| Sharp turn | smoothed lateral acceleration ≥ 0.30 g and yaw ≥ 15°/s | ≥ 300 ms; release below 0.15 g or 6°/s |
 
-Detector-local crash, swerve, and maneuver cooldowns default to 10 seconds. The stricter global non-crash cooldown is 60 seconds. Every value remains constructor-configurable and provisional pending physical validation.
+For scale: a brisk 90° turn at 15 mph pulls about 0.4 g at 35°/s, and a gentle one stays under 0.25 g.
+
+Detector-local crash, swerve, and maneuver cooldowns default to 10 seconds. The global non-crash cooldown is 15 seconds (it was 60, which hid a turn whenever braking into it had just fired).
+
+In a development build, a live drive logs the smoothed extremes to Metro every 2 seconds, plus every candidate's evidence, for tuning against real drives:
+
+```
+[imu] fwd -0.42..0.08 g, lat 0.31 g, yaw 27°/s, jerk 1.40 g/s
+[imu] harsh_corner_candidate {"durationMs":300,"peakAccelerationG":0.33,...}
+``` Every value remains constructor-configurable and provisional pending physical validation.
 
 ## Usage
 

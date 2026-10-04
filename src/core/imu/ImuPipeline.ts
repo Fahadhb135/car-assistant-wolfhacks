@@ -2,7 +2,7 @@ import type { ImuEvent } from '../events/types';
 import type { ImuSample } from '../sensors/types';
 import { resolvePipelineConfig } from './config';
 import { CrashCandidateDetector } from './CrashCandidateDetector';
-import { DrivingBehaviorDetector } from './DrivingBehaviorDetector';
+import { DrivingBehaviorDetector, type MotionPeaks } from './DrivingBehaviorDetector';
 import { extractWindowFeatures } from './features';
 import { SampleValidator } from './sampleValidation';
 import { SlidingWindowBuilder } from './SlidingWindowBuilder';
@@ -103,6 +103,11 @@ export class ImuPipeline {
       health: this.health.snapshot(),
       arbitration: this.arbitrationSnapshot(sample.receivedMonotonicMs),
     });
+  }
+
+  /** Smoothed vehicle-frame extremes since the last call; undefined until calibrated samples arrive. */
+  takeMotionPeaks(): MotionPeaks | undefined {
+    return this.behaviorDetector.takeMotionPeaks();
   }
 
   getHealth(): StreamHealthSnapshot {
