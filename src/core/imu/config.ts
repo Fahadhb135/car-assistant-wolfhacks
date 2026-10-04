@@ -5,7 +5,7 @@ export const DEFAULT_IMU_PIPELINE_CONFIG: ImuPipelineConfig = Object.freeze({
     maximumAbsoluteAccelerationG: 32,
     maximumAbsoluteAngularVelocityDps: 4_000,
   }),
-  nonCrashMotionCooldownMs: 15_000,
+  nonCrashMotionCooldownMs: 0, // only a crash quiets the drive (DriveEventGate, 15 s)
   bufferRetentionMs: 10_000,
   maximumBufferedSamples: 2_000,
   windows: Object.freeze({
@@ -32,7 +32,7 @@ export const DEFAULT_IMU_PIPELINE_CONFIG: ImuPipelineConfig = Object.freeze({
     maximumMissingSampleRatio: 0.15,
     minimumSamples: 40,
     releaseDirectionChanges: 1,
-    cooldownMs: 10_000,
+    cooldownMs: 2_000,
   }),
   // Behavior thresholds apply to a low-pass-filtered vehicle-frame signal (see smoothing), so
   // sensor noise and road vibration no longer count as jerk or as a corner.
@@ -59,14 +59,14 @@ export const DEFAULT_IMU_PIPELINE_CONFIG: ImuPipelineConfig = Object.freeze({
       releaseLongitudinalG: 0.15,
       minimumDurationMs: 250,
       minimumJerkGps: 1,
-      cooldownMs: 10_000,
+      cooldownMs: 2_000,
     }),
     rapidAcceleration: Object.freeze({
       triggerLongitudinalG: 0.4,
       releaseLongitudinalG: 0.18,
       minimumDurationMs: 500,
       minimumJerkGps: 0.6,
-      cooldownMs: 10_000,
+      cooldownMs: 2_000,
     }),
     // A brisk 90° turn at 15 mph pulls about 0.4 g at 35°/s; a gentle one stays under 0.25 g.
     // Swerves and lane changes sweep well under 45° each way before reversing.
@@ -77,7 +77,7 @@ export const DEFAULT_IMU_PIPELINE_CONFIG: ImuPipelineConfig = Object.freeze({
       releaseYawRateDps: 6,
       minimumDurationMs: 300,
       minimumHeadingChangeDeg: 45,
-      cooldownMs: 10_000,
+      cooldownMs: 2_000,
     }),
   }),
 });

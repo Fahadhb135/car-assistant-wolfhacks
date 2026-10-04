@@ -34,6 +34,8 @@ type Episode = {
   headingDeg: number;
   /** The board tilted fast during this episode, so gravity, not the car, may explain it. */
   tilted: boolean;
+  /** Seen a calm (released) reading since the stream started, so it can't fire on a stale offset. */
+  armed: boolean;
   emitted: boolean;
   cooldownUntilMs: number;
 };
@@ -44,6 +46,7 @@ const emptyEpisode = (): Episode => ({
   peakRotationDps: 0,
   headingDeg: 0,
   tilted: false,
+  armed: false,
   emitted: false,
   cooldownUntilMs: -Infinity,
 });
@@ -58,6 +61,8 @@ function clearEpisode(episode: Episode): void {
   episode.tilted = false;
   episode.emitted = false;
 }
+
+const RESTING_SEED_MS = 500;
 
 function confidence(value: number, threshold: number, duration: number, minimumDuration: number): number {
   const strength = Math.min(1, Math.max(0, value / threshold - 1) / 1.5);
@@ -74,6 +79,8 @@ export class DrivingBehaviorDetector {
   private previous?: VehicleFrameSample;
   private smoothed?: Smoothed;
   private resting = { forward: 0, lateral: 0 };
+  private restingSeeded = false;
+  private stillSinceMs?: number;
   private peaks?: { -readonly [K in keyof MotionPeaks]: number };
 
   constructor(private readonly config: DrivingBehaviorConfig) {}
@@ -220,6 +227,8 @@ export class DrivingBehaviorDetector {
     this.previous = undefined;
     this.smoothed = undefined;
     this.resting = { forward: 0, lateral: 0 };
+    this.restingSeeded = false;
+    this.stillSinceMs = undefined;
     this.peaks = undefined;
   }
 
@@ -233,7 +242,18 @@ export class DrivingBehaviorDetector {
     const rotation = Math.hypot(smoothed.yaw, smoothed.pitch, smoothed.roll);
     const config = this.config.restingLevel;
     if (Math.abs(Math.hypot(forward, lateral, vertical) - 1) > config.stillAccelerationToleranceG
-      || rotation > config.stillRotationDps) return;
+      || rotation > config.stillRotationDps) {
+      this.stillSinceMs = undefined;
+      return;
+    }
+    this.stillSinceMs ??= sample.receivedMonotonicMs;
+    if (!this.restingSeeded) {
+      // Take the first half second of stillness as the resting level outright.
+      if (sample.receivedMonotonicMs - this.stillSinceMs < RESTING_SEED_MS) return;
+      this.resting = { forward: smoothed.forward, lateral: smoothed.lateral };
+      this.restingSeeded = true;
+      return;
+    }
     const alpha = 1 - Math.exp(-elapsedMs / config.timeConstantMs);
     this.resting.forward += alpha * (smoothed.forward - this.resting.forward);
     this.resting.lateral += alpha * (smoothed.lateral - this.resting.lateral);
@@ -288,8 +308,10 @@ export class DrivingBehaviorDetector {
     const episode = options.episode;
     if (options.released) {
       clearEpisode(episode);
+      episode.armed = true;
       return undefined;
     }
+    if (!episode.armed) return undefined;
     // Onset jerk, tilt, and heading build up on the way to the trigger, so count them from release.
     episode.peakJerkGps = Math.max(episode.peakJerkGps, options.jerk);
     episode.tilted ||= options.tilting;

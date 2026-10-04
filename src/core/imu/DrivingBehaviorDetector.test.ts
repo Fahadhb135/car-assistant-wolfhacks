@@ -138,10 +138,12 @@ test('detects a sharp turn even when road vibration dips each sample below relea
 
 test('a sharp turn is a big arc; a swerve of small alternating arcs is not a turn', () => {
   // A 90° intersection turn: 0.4 g at 45°/s for two seconds.
-  const turn = stream(2_500, (ms) => ({ x: 0, y: ms < 2_000 ? 0.4 : 0, yaw: ms < 2_000 ? 45 : 0 }));
+  const turning = (ms: number) => ms >= 100 && ms < 2_100;
+  const turn = stream(2_600, (ms) => ({ x: 0, y: turning(ms) ? 0.4 : 0, yaw: turning(ms) ? 45 : 0 }));
   assert.deepEqual(turn.events.map((event) => event.kind), ['harsh_corner_candidate']);
   // Weaving: 0.5 g and 80°/s, reversing every 400 ms (about 30° each way).
   const weave = stream(3_000, (ms) => {
+    if (ms < 100) return { x: 0, y: 0, yaw: 0 };
     const side = Math.floor(ms / 400) % 2 ? -1 : 1;
     return { x: 0, y: 0.5 * side, yaw: 80 * side };
   });
@@ -157,6 +159,13 @@ test('tilting the board is not braking, but a 2 g stop is a crash even while til
   assert.deepEqual(tilt.events, []);
   const slam = stream(600, (ms) => ({ x: ms < 100 ? 0 : -2.6, y: 0, yaw: 0, pitch: ms < 100 ? 0 : 120 }));
   assert.deepEqual(slam.events.map((event) => event.kind), ['crash_candidate']);
+});
+
+test('cannot fire on a stale tilt it never saw calm', () => {
+  const restingTilt = { x: -0.47, y: 0.18, z: Math.sqrt(1 - 0.47 ** 2 - 0.18 ** 2), yaw: 0 };
+  // Picked up 300 ms after connecting, before the resting level is learned.
+  const { events } = stream(1_500, (ms) => (ms < 300 ? restingTilt : { ...restingTilt, x: -0.6 }));
+  assert.deepEqual(events, []);
 });
 
 test('learns a shifted mount at rest, so the tilt is not braking but a real stop still is', () => {
