@@ -13,7 +13,10 @@ export type RoadMatchOptions = {
   maxHeadingDeltaDeg?: number;
 };
 
-export type RoadMatch = { road: RoadWay; distanceM: number; headingDeltaDeg: number };
+/** What matching needs from a way: its shape and direction of travel. */
+export type MatchableWay = Pick<RoadWay, 'geometry' | 'oneway'>;
+
+export type RoadMatch<T extends MatchableWay = RoadWay> = { road: T; distanceM: number; headingDeltaDeg: number };
 
 const M_PER_DEG = (Math.PI * EARTH_RADIUS_M) / 180;
 
@@ -35,7 +38,7 @@ export function distanceToSegmentM(p: LatLon, a: LatLon, b: LatLon): number {
 }
 
 /** Closest distance from p to any segment of the way. */
-export function distanceToWayM(p: LatLon, road: RoadWay): number {
+export function distanceToWayM(p: LatLon, road: MatchableWay): number {
   let best = Infinity;
   for (let i = 1; i < road.geometry.length; i++) {
     best = Math.min(best, distanceToSegmentM(p, road.geometry[i - 1], road.geometry[i]));
@@ -43,15 +46,15 @@ export function distanceToWayM(p: LatLon, road: RoadWay): number {
   return best;
 }
 
-export function matchRoad(
+export function matchRoad<T extends MatchableWay = RoadWay>(
   car: LatLon & { heading?: number | null },
-  roads: readonly RoadWay[],
+  roads: readonly T[],
   opts: RoadMatchOptions = {},
-): RoadMatch | null {
+): RoadMatch<T> | null {
   const { maxDistanceM = 25, maxHeadingDeltaDeg = 40 } = opts;
   if (!hasHeading(car.heading)) return null;
 
-  let best: (RoadMatch & { score: number }) | null = null;
+  let best: (RoadMatch<T> & { score: number }) | null = null;
   for (const road of roads) {
     for (let i = 1; i < road.geometry.length; i++) {
       const a = road.geometry[i - 1];

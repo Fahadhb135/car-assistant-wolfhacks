@@ -45,6 +45,8 @@ export function useLiveImuDrive(
   error: string | null;
   coach: CoachMessage;
   eventsRef: React.MutableRefObject<DriveEvent[]>;
+  /** Adds an event from another live source (e.g. location coaching) to the trip and coach card. */
+  recordEvent: (event: DriveEvent) => void;
   stop: () => Promise<void>;
 }> {
   const [status, setStatus] = useState<LiveImuStatus>('idle');
@@ -53,6 +55,13 @@ export function useLiveImuDrive(
   const eventsRef = useRef<DriveEvent[]>([]);
   const runtimeRef = useRef<Runtime | null>(null);
   const calmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const recordEvent = useCallback((event: DriveEvent) => {
+    eventsRef.current.push(event);
+    setCoach(coachMessage(event));
+    if (calmTimerRef.current) clearTimeout(calmTimerRef.current);
+    calmTimerRef.current = setTimeout(() => setCoach(CLEAR_ROAD), CALM_AFTER_MS);
+  }, []);
 
   const stop = useCallback(async () => {
     const runtime = runtimeRef.current;
@@ -102,15 +111,7 @@ export function useLiveImuDrive(
         const source = new StevalMkboxProSensorSource(client);
         runtime.source = source;
         const pipeline = new ImuPipeline();
-        const eventRouter = new ImuEventRouter({
-          voice,
-          onEvent: (event) => {
-            eventsRef.current.push(event);
-            setCoach(coachMessage(event));
-            if (calmTimerRef.current) clearTimeout(calmTimerRef.current);
-            calmTimerRef.current = setTimeout(() => setCoach(CLEAR_ROAD), CALM_AFTER_MS);
-          },
-        });
+        const eventRouter = new ImuEventRouter({ voice, onEvent: recordEvent });
 
         setStatus('starting');
         await source.start(
@@ -140,7 +141,7 @@ export function useLiveImuDrive(
       void dispose(runtime).then(() => runtime.startup.catch(() => undefined));
       if (runtimeRef.current === runtime) runtimeRef.current = null;
     };
-  }, [deviceId, enabled, voice]);
+  }, [deviceId, enabled, recordEvent, voice]);
 
-  return { status, error, coach, eventsRef, stop };
+  return { status, error, coach, eventsRef, recordEvent, stop };
 }

@@ -80,12 +80,17 @@ describe('tiles', () => {
 });
 
 describe('overpass parsing', () => {
-  it('builds one bbox query for signs, lights, highways and ramps', () => {
+  it('builds one bbox query for signs, lights and every drivable road', () => {
     const q = buildTileQuery({ south: 1, west: 2, north: 3, east: 4 });
     const bbox = '(1.000000,2.000000,3.000000,4.000000)';
     assert.match(q, /^\[out:json\]/);
     assert.ok(q.includes(`node["highway"~"^(stop|traffic_signals)$"]${bbox}`));
-    assert.ok(q.includes(`way["highway"~"^(motorway|motorway_link)$"]${bbox}`));
+    const roads = q.match(/way\["highway"~"\^\(([^)]*)\)\$"\]/)?.[1]?.split('|') ?? [];
+    for (const cls of ['motorway', 'motorway_link', 'primary', 'residential', 'tertiary_link']) {
+      assert.ok(roads.includes(cls), `query is missing ${cls}`);
+    }
+    assert.ok(!roads.includes('footway') && !roads.includes('service'));
+    assert.ok(q.includes(`)$"]${bbox}`));
     assert.match(q, /out geom;$/);
   });
 
@@ -107,7 +112,7 @@ describe('overpass parsing', () => {
     assert.equal(parseMaxspeed(undefined), null);
   });
 
-  it('keeps stop signs, traffic lights and highway/ramp ways', () => {
+  it('keeps stop signs, traffic lights, highway/ramp ways and speed limits', () => {
     const geometry = [
       { lat: 35, lon: -78 },
       { lat: 35.01, lon: -78 },
@@ -136,7 +141,16 @@ describe('overpass parsing', () => {
     );
     near(tile.roads[0].maxspeedMps!, 29.06, 0.01);
     assert.equal(tile.roads[1].maxspeedMps, null);
-    assert.deepEqual(parseTile({}), { features: [], roads: [] });
+    // Every drivable way (with enough geometry) is kept for speed limits, highways included.
+    assert.deepEqual(
+      tile.speedLimits?.map((w) => [w.id, w.highway, w.oneway, w.maxspeedMps === null]),
+      [
+        [10, 'motorway', 1, false],
+        [11, 'motorway_link', -1, true],
+        [12, 'primary', 0, true],
+      ],
+    );
+    assert.deepEqual(parseTile({}), { features: [], roads: [], speedLimits: [] });
   });
 });
 

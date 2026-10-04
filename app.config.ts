@@ -15,6 +15,13 @@ const config: ExpoConfig = {
   plugins: [
     'expo-router',
     [
+      'expo-location',
+      {
+        locationWhenInUsePermission:
+          'Allow Car Assistant to use your location to warn you about stop signs, traffic lights and highway ramps ahead.',
+      },
+    ],
+    [
       'react-native-ble-plx',
       {
         bluetoothAlwaysPermission:

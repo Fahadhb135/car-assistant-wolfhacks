@@ -40,6 +40,12 @@ export function coachMessage(e: DriveEvent): CoachMessage {
       return { title: 'Missed the stop', detail: 'Start slowing down earlier.', tone: 'urgent' };
     case 'stop_ok':
       return { title: 'Nice stop', detail: 'Full stop. Well done.', tone: 'info' };
+    case 'speeding':
+      return {
+        title: 'Slow down',
+        detail: `You're going ${mph(e.speedMps)} mph. The limit${e.road ? ` on ${e.road}` : ''} is ${mph(e.limitMps)} mph.`,
+        tone: 'warn',
+      };
     case 'erratic_driving':
       return { title: 'Unsteady driving', detail: 'Ease off and stay in your lane.', tone: 'warn' };
   }

@@ -1,4 +1,4 @@
-import { destination, EARTH_RADIUS_M, METERS_PER_MILE, type LatLon } from './geo';
+import { destination, distanceM, EARTH_RADIUS_M, METERS_PER_MILE, type LatLon } from './geo';
 
 // Map data is fetched in ~1-mile square tiles (README section 7) so we query
 // Overpass once per tile instead of once per GPS fix.
@@ -83,4 +83,25 @@ export function nextTileToPrefetch(
   if (!hasHeading(p.heading)) return null;
   const ahead = tileKeyFor(destination(p, p.heading, lookaheadM));
   return ahead === tileKeyFor(p) ? null : ahead;
+}
+
+/** Every tile whose bounds come within radiusM of the center, nearest first. */
+export function tilesWithinRadius(center: LatLon, radiusM: number): TileKey[] {
+  const [row0, col0] = tileKeyFor(center).split(':').map(Number) as [number, number];
+  // Tiles are TILE_SIZE_M square, so the radius spans at most this many tiles each way.
+  const span = Math.ceil(radiusM / TILE_SIZE_M) + 1;
+  const found: { key: TileKey; distance: number }[] = [];
+  for (let row = row0 - span; row <= row0 + span; row++) {
+    for (let col = col0 - span; col <= col0 + span; col++) {
+      const key: TileKey = `${row}:${col}`;
+      const b = tileBounds(key);
+      const nearest = {
+        lat: Math.min(Math.max(center.lat, b.south), b.north),
+        lon: Math.min(Math.max(center.lon, b.west), b.east),
+      };
+      const distance = distanceM(center, nearest);
+      if (distance <= radiusM) found.push({ key, distance });
+    }
+  }
+  return found.sort((a, b) => a.distance - b.distance).map((t) => t.key);
 }

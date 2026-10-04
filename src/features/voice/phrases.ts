@@ -18,6 +18,8 @@ export const POLICIES: Record<AlertKind, AlertPolicy> = {
   highway_exiting: { priority: 58, ttlMs: 6_000, cooldownMs: 15_000 },
   traffic_light_ahead: { priority: 55, ttlMs: 4_000, cooldownMs: 5_000 },
   rolling_stop: { priority: 60, ttlMs: 5_000, cooldownMs: 10_000 },
+  // Below stop signs and highway merges, above traffic lights; SpeedingCoach has its own cooldown.
+  speeding: { priority: 57, ttlMs: 4_000, cooldownMs: 15_000 },
   erratic_driving: { priority: 50, ttlMs: 5_000, cooldownMs: 20_000 },
   stop_ok: { priority: 20, ttlMs: 4_000, cooldownMs: 15_000 },
   chat_reply: { priority: 30, ttlMs: 15_000, cooldownMs: 0 },
@@ -34,6 +36,7 @@ export const PHRASES = {
   erratic_driving: 'Your driving looks unsteady. Take it easy and stay in your lane.',
   stop_ok: 'Nice stop.',
   traffic_light_ahead: 'Traffic light ahead.',
+  speeding: "You're over the speed limit. Slow down.",
   highway_merge: 'Merging onto the highway. Speed up to match traffic.',
   highway_exit: 'Exit ahead. Slow down for the ramp.',
   hotspot_rolling: 'Heads up. Drivers often roll through the stop here.',
@@ -42,6 +45,12 @@ export const PHRASES = {
 } as const;
 
 export type PhraseId = keyof typeof PHRASES;
+
+/** Phrases with no generated ElevenLabs clip yet; run `npm run phrases` with a key, then remove them. */
+export type PhraseWithoutAudio = 'speeding';
+/** Phrases that have a bundled clip in assets/audio. */
+export type BundledPhraseId = Exclude<PhraseId, PhraseWithoutAudio>;
+const PHRASES_WITHOUT_AUDIO = new Set<PhraseId>(['speeding'] satisfies PhraseWithoutAudio[]);
 
 /** Fixed phrase for an event, or null when it should stay silent (e.g. a highway ramp taken at a good speed). */
 function phraseFor(event: DriveEvent): PhraseId | null {
@@ -60,6 +69,8 @@ function phraseFor(event: DriveEvent): PhraseId | null {
       return 'stop_ok';
     case 'traffic_light_ahead':
       return 'traffic_light_ahead';
+    case 'speeding':
+      return 'speeding';
     case 'highway_entering':
       return event.advice === 'speed_up' ? 'highway_merge' : null;
     case 'highway_exiting':
@@ -77,7 +88,9 @@ export function alertFromEvent(event: DriveEvent): Alert | null {
   const phraseId = phraseFor(event);
   if (!phraseId) return null;
   const policy = POLICIES[event.kind];
-  const bundledPhraseId = event.kind === 'crash' && !event.confirmed ? undefined : phraseId;
+  // No bundled clip for these yet, so they use device TTS (see PHRASES_WITHOUT_AUDIO).
+  const bundledPhraseId =
+    (event.kind === 'crash' && !event.confirmed) || PHRASES_WITHOUT_AUDIO.has(phraseId) ? undefined : phraseId;
   return {
     id: event.eventId,
     kind: event.kind,

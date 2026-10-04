@@ -6,7 +6,7 @@ An AI driving coach built on the **STMicroelectronics SensorTile.box**. A dash-m
 
 Track: **Applied AI Hardware+**. Collect, analyze and act on real sensor data; detect patterns/anomalies; deploy ML to edge/IoT devices.
 
-> Status: the Expo app can select a STEVAL-MKBOXPRO, decode its DATALOG2 v3.4 accelerometer/gyroscope stream, run the pure-TypeScript IMU pipeline, and route experimental crash/swerve candidates into the live drive event, voice, UI, and trip paths. Thresholds and provisional scale factors still require physical validation (see [the IMU pipeline guide](docs/imu-pipeline.md)). Ending a drive keeps a retryable in-app trip and posts it to the FastAPI service, which starts Gemini report generation and Databricks synchronization. The location modules, voice alert queue, bundled ElevenLabs audio, streamed push-to-talk Gemini chat, crowd hotspots, cloud service, and Databricks pipeline are implemented; replay mode runs the coaching and voice path offline on a bundled route.
+> Status: the Expo app can select a STEVAL-MKBOXPRO, decode its DATALOG2 v3.4 accelerometer/gyroscope stream, run the pure-TypeScript IMU pipeline, and route experimental crash/swerve candidates into the live drive event, voice, UI, and trip paths. Thresholds and provisional scale factors still require physical validation (see [the IMU pipeline guide](docs/imu-pipeline.md)). Ending a drive keeps a retryable in-app trip and posts it to the FastAPI service, which starts Gemini report generation and Databricks synchronization. Live drives also run GPS location coaching (stop signs, traffic lights, highway entry/exit from OpenStreetMap; foreground only). The location modules, voice alert queue, bundled ElevenLabs audio, streamed push-to-talk Gemini chat, crowd hotspots, cloud service, and Databricks pipeline are implemented; replay mode runs the coaching and voice path offline on a bundled route.
 
 ---
 
@@ -95,7 +95,7 @@ Notes:
 2. **Calibrate.** At the start of a trip, estimate the gravity vector and rotate samples into vehicle axes (forward / lateral / vertical).
 3. **Crash check.** Every sample goes through the threshold crash detector (see 6.1). The IMU pipeline (`src/core/imu/`) currently emits an experimental `crash_candidate`; `src/core/events/fromImu.ts` maps it to a `crash` event so the voice layer can alert. Real-data tuning is follow-up work.
 4. **Window and infer.** The current implementation uses timestamp windows and a deterministic swerve heuristic to emit `swerve_candidate`, which the same adapter maps to `erratic_driving`. The planned on-device erratic-driving model can later consume the same features after real drives are collected and evaluated.
-5. **Location coach.** GPS plus heading are matched against cached map data (see Section 7). Emits `stop_sign_ahead`, `traffic_light_ahead`, `highway_entering` and `highway_exiting` events (implemented), and stop-compliance events `stop_ok` / `rolling_stop` / `ran_stop` (planned).
+5. **Location coach.** GPS plus heading are matched against cached map data (see Section 7). Emits `stop_sign_ahead`, `traffic_light_ahead`, `highway_entering`, `highway_exiting` and `speeding` events (implemented), and stop-compliance events `stop_ok` / `rolling_stop` / `ran_stop` (planned).
 6. **Speak.** Events go to a priority queue, then ElevenLabs (cached audio for fixed phrases), plus a local notification and on-screen banner.
 7. **Talk back.** The driver can speak to the assistant through Gemini Live ("how was that turn?"). The phone fetches a short-lived token from the cloud service and connects directly. Trip context is passed in so answers are specific. Transcripts are stored with the trip.
 8. **Store.** Live IMU events and a score are retained in the in-app trip store. Durable storage, location events, features and chat transcripts still need to be added to live-trip serialization.
@@ -199,9 +199,43 @@ Both detectors run on the phone, with no server in the loop. The model is traine
    - stop signs: nodes `highway=stop`
    - traffic lights: nodes `highway=traffic_signals`
    - highways and ramps: ways `highway=motorway` and `highway=motorway_link`, with geometry, `oneway`, `maxspeed`, `ref` and `name`
+   - every drivable road (motorway down to residential, plus links) with geometry, `oneway` and `maxspeed`, for speed-limit checks (`speedLimits` in the tile; untagged roads are kept with a null limit so the car is not matched to a tagged neighbour)
 3. **Cache** (`src/integrations/location/tileCache.ts`), in order: memory, then persistent store, then Overpass, then a stale stored copy, then bundled demo-route tiles. Stored tiles carry a schema version so tiles from an older build are refetched rather than misread.
 4. **Prefetch:** when the point 25% of a tile ahead along the heading falls in another tile, fetch that tile. The tiles under the look-ahead cone are loaded too, since a sign 150 m ahead can sit across a tile border.
 5. **The live path never waits on the network:** call `cache.update(fix)` on every fix without awaiting it, then read `cache.featuresAhead(fix)` and `cache.roadsNear(fix)` synchronously and pass them to `LocationCoach.update(fix, ahead, roads)` (`src/core/location/coach.ts`).
+
+**Live drives** (`src/features/driving-session/useLiveLocation.ts`):
+- The drive screen watches the phone's GPS with `expo-location` at about 1 Hz (best-for-navigation accuracy) and feeds each fix to a `DriveSession` built by `createLiveLocationSession.ts`.
+- That session is the same one replay uses, with the real `OverpassClient` instead of the offline stub.
+- Location events share the live IMU event path: coach card, voice, push-to-talk chat context and the trip record.
+- The **LOCATION** indicator shows the permission, GPS and map-tile state.
+
+**Map area around the car** (`src/core/location/regionPrefetch.ts`):
+- On the first fix, every tile within **2 miles** is prefetched in the background, at most two Overpass requests at a time.
+- When the car comes within **half a mile of the area's edge**, the area re-centres on the car:
+  - tiles outside the new area are dropped;
+  - new tiles are fetched;
+  - tiles still inside are kept, not refetched.
+
+**Pre-downloaded tiles** (`scripts/prefetch-tiles.mts <lat> <lon> [radiusMiles=2]`):
+- The script fetches every tile within the radius, retrying across the mirrors plus VK's (`maps.mail.ru`), and writes them to `fixtures/tiles/prefetched.json`.
+- At the start of a live drive, the app loads that file into its tile store as downloaded tiles, so the area works immediately and offline.
+- Those tiles are refetched once they are a week old, and the saved copy is kept if that refetch fails.
+- The current file covers 2 miles around NC State's Centennial Campus.
+
+**Speeding** (`src/core/location/speeding.ts`):
+- Each fix is map-matched (position plus heading, within 20 m and 40°) to the drivable road the car is on.
+- **`speeding`** fires when the car stays more than 5 mph over that road's `maxspeed` for 3 consecutive fixes.
+- After a warning, it stays quiet for 60 s while the car keeps speeding, or 15 s if the driver slowed to the limit in between.
+- Roads without a `maxspeed` tag never warn.
+- The coach card shows the speed and limit. The voice says "You're over the speed limit. Slow down." using device TTS, since no ElevenLabs clip has been generated for it yet (`PhraseWithoutAudio` in `phrases.ts`).
+- Around Centennial Campus, 99% of drivable road length has a `maxspeed` tag.
+
+Current limits:
+- **Foreground only.** Tracking pauses if the app is backgrounded or the screen locks.
+- **Tiles live in memory** for the app session (`MemoryTileStore`), plus the pre-downloaded file. Nothing new is persisted across restarts.
+- **No crowd hotspots** on live drives yet.
+- **Trip uploads don't include `speeding`.** `tripUpload.cloudEvents` only uploads the kinds the cloud consumers use.
 
 **Stop signs and traffic lights ahead** (`featureFilter.ts`): keep features within 200 m and ±35° of the heading. When OSM gives an absolute `direction` (degrees or cardinal), drop features that face a cross street; we read it as the way the sign faces, so a north-facing sign applies to southbound cars. `forward`/`backward` and untagged features are kept, and most OSM stop signs are untagged.
 

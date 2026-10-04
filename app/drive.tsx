@@ -15,6 +15,8 @@ import {
 import { useCoachChat, type CoachChatApi } from '@/features/driving-session/useCoachChat';
 import { useDriveVoice } from '@/features/driving-session/useDriveVoice';
 import { useLiveImuDrive } from '@/features/driving-session/useLiveImuDrive';
+import { SpeedBadge } from '@/features/driving-session/SpeedBadge';
+import { useLiveLocation, type LiveLocationStatus } from '@/features/driving-session/useLiveLocation';
 import { useReplayDrive } from '@/features/driving-session/useReplayDrive';
 import { POLICIES } from '@/features/voice/phrases';
 import { buildCloudTrip } from '@/integrations/backend/tripUpload';
@@ -26,6 +28,15 @@ const TONE_BACKGROUND: Record<CoachMessage['tone'], string> = {
   info: colors.mint,
   warn: colors.amberSoft,
   urgent: '#F6D5D5',
+};
+
+const LOCATION_LABEL: Record<LiveLocationStatus, string> = {
+  idle: 'Off',
+  requesting: 'Starting…',
+  denied: 'No permission',
+  waiting: 'Finding GPS…',
+  tracking: 'Tracking',
+  error: 'Error',
 };
 
 function formatTime(totalSeconds: number) {
@@ -52,6 +63,7 @@ export default function DriveRoute() {
   );
   const replay = useReplayDrive(replayMode, voice);
   const live = useLiveImuDrive(!replayMode, deviceId, voice);
+  const location = useLiveLocation(!replayMode, voice, live.recordEvent);
   const getEvents = useCallback(
     () => (replayMode ? replay.eventsRef.current : live.eventsRef.current),
     [live.eventsRef, replay.eventsRef, replayMode],
@@ -104,7 +116,12 @@ export default function DriveRoute() {
               {replayMode ? 'REPLAY ACTIVE' : 'DRIVE ACTIVE'}
             </Text>
           </View>
-          <Text variant="titleMedium" style={styles.timer}>{formatTime(elapsedSeconds)}</Text>
+          <View style={styles.topRight}>
+            <Text variant="titleMedium" style={styles.timer}>{formatTime(elapsedSeconds)}</Text>
+            {!replayMode ? (
+              <SpeedBadge speedMps={location.speedMps} limitMps={location.limitMps} toleranceMps={location.toleranceMps} />
+            ) : null}
+          </View>
         </View>
 
         <View style={styles.scoreSection} accessibilityLabel="Smoothness score 92 out of 100">
@@ -133,6 +150,11 @@ export default function DriveRoute() {
         {live.error && !replayMode ? (
           <Text variant="bodySmall" style={styles.sensorError}>{live.error}</Text>
         ) : null}
+        {location.status === 'denied' && !replayMode ? (
+          <Text variant="bodySmall" style={styles.sensorError}>
+            Location is off, so stop sign, traffic light and highway coaching is unavailable. Allow location for Car Assistant in Settings.
+          </Text>
+        ) : null}
 
         <CoachChatBar chat={chat} />
 
@@ -148,7 +170,9 @@ export default function DriveRoute() {
             <View style={styles.okDot} />
             <View>
               <Text variant="labelMedium" style={styles.signalLabel}>LOCATION</Text>
-              <Text variant="bodyMedium" style={styles.signalValue}>Tracking</Text>
+              <Text variant="bodyMedium" style={styles.signalValue}>
+                {replayMode ? 'Replay' : location.mapError && location.status === 'tracking' ? 'Map offline' : LOCATION_LABEL[location.status]}
+              </Text>
             </View>
           </View>
           <View style={styles.signalItem}>
@@ -196,6 +220,7 @@ const styles = StyleSheet.create({
   safeArea: { backgroundColor: colors.forestDeep, flex: 1 },
   container: { flexGrow: 1, justifyContent: 'space-between', padding: 20, paddingBottom: 26 },
   topBar: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  topRight: { alignItems: 'center', flexDirection: 'row', gap: 12 },
   livePill: { alignItems: 'center', backgroundColor: '#173A2A', borderRadius: 99, flexDirection: 'row', gap: 8, paddingHorizontal: 13, paddingVertical: 8 },
   liveDot: { backgroundColor: '#79D69F', borderRadius: 5, height: 9, width: 9 },
   liveText: { color: '#A8DDBD', fontWeight: '800', letterSpacing: 1 },

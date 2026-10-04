@@ -1,10 +1,10 @@
-import type { PhraseId } from './phrases';
+import type { BundledPhraseId } from './phrases';
 
 /**
  * Phrase id -> bundled mp3 (made by `npm run phrases`). Typed against PHRASES, so adding a phrase
- * without its audio file is a compile error. Metro resolves each require() to an asset id.
+ * without its audio file is a compile error (unless it is listed in PhraseWithoutAudio). Metro resolves each require() to an asset id.
  */
-export const BUNDLED_PHRASES: Record<PhraseId, number> = {
+export const BUNDLED_PHRASES: Record<BundledPhraseId, number> = {
   crash_check: require('../../../assets/audio/crash_check.mp3'),
   crash_confirmed: require('../../../assets/audio/crash_confirmed.mp3'),
   ran_stop: require('../../../assets/audio/ran_stop.mp3'),
