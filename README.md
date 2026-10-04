@@ -6,7 +6,7 @@ An AI driving coach built on the **STMicroelectronics SensorTile.box**. A dash-m
 
 Track: **Applied AI Hardware+**. Collect, analyze and act on real sensor data; detect patterns/anomalies; deploy ML to edge/IoT devices.
 
-> Status: the Expo app can select a STEVAL-MKBOXPRO, decode its DATALOG2 v3.4 accelerometer/gyroscope stream, calibrate its mounted vehicle frame, and run the pure-TypeScript IMU pipeline with conservative event arbitration. Live IMU and location events share a per-drive gate: the first unconfirmed possible crash takes precedence and starts 15 seconds of quiet mode, while passive GPS/BLE/timer/end controls continue. Non-crash IMU coaching is globally limited to one candidate per 15 seconds; a sustained deceleration beyond 1.2 g also counts as a possible crash. Thresholds and provisional scale factors still require physical iPhone/SensorTile validation (see [the IMU pipeline guide](docs/imu-pipeline.md)). Ending a drive keeps a retryable in-app trip and posts it to the FastAPI service, which starts Gemini report generation and Databricks synchronization. Live drives also run foreground GPS location coaching for speeding, stop signs, traffic lights, and highway entry/exit using OpenStreetMap. The location modules, voice alert queue, bundled ElevenLabs audio, streamed push-to-talk Gemini chat, crowd hotspots, cloud service, and Databricks pipeline are implemented; replay mode runs the coaching and voice path offline on a bundled route.
+> Status: the Expo app can select a STEVAL-MKBOXPRO, decode its DATALOG2 v3.4 accelerometer/gyroscope stream, calibrate its mounted vehicle frame, and run the pure-TypeScript IMU pipeline with conservative event arbitration. Live IMU and location events share a per-drive gate: the first unconfirmed possible crash takes precedence and starts 15 seconds of quiet mode, while passive GPS/BLE/timer/end controls continue. Non-crash IMU coaching is globally limited to one candidate per 15 seconds; a sustained deceleration beyond 1.2 g also counts as a possible crash. Thresholds and provisional scale factors still require physical iPhone/SensorTile validation (see [the IMU pipeline guide](docs/imu-pipeline.md)). Ending a drive keeps a retryable in-app trip and posts it to the FastAPI service, which starts Gemini report generation and Databricks synchronization. Live drives also run foreground GPS location coaching for speeding, stop signs, traffic lights, and highway entry/exit using OpenStreetMap. The location modules, voice alert queue, bundled ElevenLabs audio, streamed push-to-talk Gemini chat, crowd hotspots, cloud service, and Databricks pipeline are implemented; replay mode runs the coaching and voice path offline on a bundled route. A parent can link to a driver with a one-time code and follow past drives, score and stop trends, and speeding alerts in the app's Parent view (see Section 9); the driver can end that access at any time.
 
 ---
 
@@ -136,7 +136,7 @@ Live detection, alerts and the stop-sign coach need no network. The network is u
 ### Ideas for new/young drivers
 - Coaching mode with calmer, more verbose voice and tips (following distance, smooth braking)
 - Guided practice routes with per-turn feedback ("good brake, a bit sharp on that corner")
-- Parent view: weekly score and trends from the Databricks dashboard, no raw location sharing by default, opt-in only
+- **Parent view (built):** past drives, smoothness and stop-compliance trends, and a speeding report (7 days / 30 days / all time), from the Databricks analysis. Linked by a one-time code the driver shows; no raw location sharing by default, opt-in per code, and revocable (Section 9). Not built: push alerts to parents, multiple parents with different permissions, real accounts.
 - Gamified streaks and badges for clean stops and smooth drives
 - Teen curfew / geofence alerts
 
@@ -317,6 +317,15 @@ Module boundaries: `ble/` → `pipeline/` (calibrate, window, features) → `det
 | `POST /live-token` | Mint a short-lived Gemini Live token for the phone |
 | `GET /model/latest` | Current model version, checksum and download URL |
 | `GET /health` | Liveness |
+| `POST /drivers/{driverId}/share-code` | Driver side. A 6-digit, single-use code that works for 10 minutes. Body `{shareLocation}` (default false). A new code replaces the driver's earlier unused one. |
+| `POST /parent/link` | Parent side. Body `{code}`; returns `{viewerToken, driverId, shareLocation}`. Wrong codes are rate limited (10 per 10 minutes per client). |
+| `DELETE /drivers/{driverId}/viewers` | Driver side. Revokes every linked parent and any unused code. |
+| `GET /parent/summary?range=7d\|30d\|all` | Trips, minutes, distance, average / first / latest smoothness, stop compliance, problem events per trip by kind, speeding alerts, top issue, last trip |
+| `GET /parent/trends?range=` | One point per drive for the charts (smoothness, stop compliance, 3-drive average, problem events) |
+| `GET /parent/trips?limit=&before=` | Past drives, newest first, paged by start time (`nextBefore`) |
+| `GET /parent/trips/{tripId}` | One drive: scores, distance, the events worth reviewing, and the Gemini report |
+| `GET /parent/speeding?range=` | Speeding alerts with road, speed, limit and mph over; totals, share of drives, counts at 5+/10+/15+ mph over, and a by-road breakdown |
+| `POST /admin/parent/refresh` | Re-read the dashboard snapshot Databricks published (admin token or localhost) |
 
 ```json
 // POST /trips
@@ -327,6 +336,13 @@ Module boundaries: `ble/` → `pipeline/` (calibrate, window, features) → `det
 ```
 
 Driver ids are anonymous. Upload is opt-in, wifi-only by default, and queued with retry when offline.
+
+**Parent dashboard.** There are no accounts, so access is a link between one phone and one driver:
+- Every `/parent/*` call needs `Authorization: Bearer <viewerToken>`. The token is scoped to one driver (the id comes from the token, never the URL), so knowing a driver id is not enough. Another driver's trip answers 404, exactly like a trip that does not exist. Only a hash of each token is stored.
+- `lat` / `lon` are removed from every parent response unless the driver turned on "Share locations" when making that code.
+- Data path: `02_analytics` publishes `publish/parent_dashboard.json` (one summary row per trip and every speeding alert, per driver; the logic is `cloud/app/parent.py`, shared with the service). The service caches it for 10 minutes and adds trips uploaded since from its own SQLite, so a drive shows up right after upload. Ranges are worked out per request. Every response says `source` (`databricks` or `local`) and `generatedAt`, and the app shows both; with Databricks unreachable it serves `local`.
+- Limits: `/drivers/{id}/share-code` and `DELETE .../viewers` are not authenticated beyond knowing the anonymous driver id (a hackathon trade-off; the id is a private random value on the phone, except for seeded `demo-*` drivers). Speeding counts coach alerts (at most one a minute, from 5 mph over the limit), not time spent speeding. `speeding` is deliberately not one of the "problem events" in `databricks/lib/flatten.py` (`BAD_KINDS`), so existing scores and risky locations are unchanged; it is counted separately as `nSpeeding`.
+- Trip distance (`scores.distanceM`, summed from GPS fixes, hops under 5 m or over 1 km ignored) is new in the upload. Older trips and trips without GPS have none and show "Not recorded".
 
 ---
 
@@ -342,6 +358,12 @@ car-assistant-wolfhacks/
 │   ├── drive.tsx                # Active driving screen (currently mock data)
 │   ├── diagnostics.tsx          # BLE/GATT developer diagnostics
 │   ├── settings.tsx
+│   ├── share.tsx                # Driver: show a code to a parent, share locations, end access
+│   ├── parent/
+│   │   ├── index.tsx            # Parent dashboard: KPIs, trends, recent drives
+│   │   ├── link.tsx             # Parent enters the driver's 6-digit code
+│   │   ├── speeding.tsx         # Speeding report
+│   │   └── trips/[id].tsx       # One drive, with the Gemini report
 │   └── trips/
 │       └── [id].tsx             # Trip report
 │
@@ -381,9 +403,11 @@ car-assistant-wolfhacks/
 │   │   ├── audio/
 │   │   ├── storage/
 │   │   └── backend/             # Client for a remote backend; not server code
+│   │       └── parentClient.ts  # Parent endpoints: validated parsing, typed failures
 │   │
 │   ├── features/                # User-facing mobile features
 │   │   ├── device-setup/
+│   │   ├── parent-dashboard/    # Link storage, offline fallback cache, formatting, bar chart
 │   │   ├── driving-session/
 │   │   ├── alert-feed/
 │   │   └── trip-summary/

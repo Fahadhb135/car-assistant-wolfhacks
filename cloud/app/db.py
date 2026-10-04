@@ -1,5 +1,7 @@
+import hashlib
 import json
 import os
+import secrets
 import sqlite3
 from typing import Optional
 
@@ -18,6 +20,19 @@ CREATE TABLE IF NOT EXISTS hotspot_snapshot (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   payload TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS share_codes (
+  code TEXT PRIMARY KEY,
+  driver_id TEXT NOT NULL,
+  share_location INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS viewers (
+  token_hash TEXT PRIMARY KEY,
+  driver_id TEXT NOT NULL,
+  share_location INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS trips_by_driver ON trips (driver_id);
 """
 
 
@@ -80,3 +95,68 @@ class TripStore:
     def clear_hotspots(self) -> None:
         self.conn.execute("DELETE FROM hotspot_snapshot")
         self.conn.commit()
+
+    # --- Parent access: a short-lived share code the driver shows, traded for a viewer token ---
+
+    def trips_for_driver(self, driver_id: str) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT payload FROM trips WHERE driver_id=? ORDER BY received_at", (driver_id,)
+        ).fetchall()
+        return [json.loads(r[0]) for r in rows]
+
+    def create_share_code(self, driver_id: str, share_location: bool, now_ms: int, ttl_ms: int) -> tuple[str, int]:
+        """A new 6-digit code. Replaces the driver's earlier unused codes and drops expired ones."""
+        expires = now_ms + ttl_ms
+        self.conn.execute("DELETE FROM share_codes WHERE expires_at<=? OR driver_id=?", (now_ms, driver_id))
+        while True:
+            code = f"{secrets.randbelow(1_000_000):06d}"
+            try:
+                self.conn.execute(
+                    "INSERT INTO share_codes (code, driver_id, share_location, expires_at) VALUES (?,?,?,?)",
+                    (code, driver_id, int(share_location), expires),
+                )
+                break
+            except sqlite3.IntegrityError:  # another driver holds this code right now
+                continue
+        self.conn.commit()
+        return code, expires
+
+    def redeem_share_code(self, code: str, now_ms: int) -> Optional[tuple[str, bool]]:
+        """One use only: returns (driver_id, share_location), or None if unknown or expired."""
+        row = self.conn.execute(
+            "SELECT driver_id, share_location, expires_at FROM share_codes WHERE code=?", (code,)
+        ).fetchone()
+        if row is None:
+            return None
+        deleted = self.conn.execute("DELETE FROM share_codes WHERE code=?", (code,)).rowcount
+        self.conn.commit()
+        if deleted != 1 or row[2] <= now_ms:
+            return None
+        return row[0], bool(row[1])
+
+    @staticmethod
+    def _hash(token: str) -> str:
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    def add_viewer(self, driver_id: str, share_location: bool, now_ms: int) -> str:
+        """Returns the token once; only its hash is stored."""
+        token = secrets.token_urlsafe(32)
+        self.conn.execute(
+            "INSERT INTO viewers (token_hash, driver_id, share_location, created_at) VALUES (?,?,?,?)",
+            (self._hash(token), driver_id, int(share_location), now_ms),
+        )
+        self.conn.commit()
+        return token
+
+    def get_viewer(self, token: str) -> Optional[tuple[str, bool]]:
+        row = self.conn.execute(
+            "SELECT driver_id, share_location FROM viewers WHERE token_hash=?", (self._hash(token),)
+        ).fetchone()
+        return (row[0], bool(row[1])) if row else None
+
+    def revoke_viewers(self, driver_id: str) -> int:
+        """Revokes every parent of this driver and any code not yet used."""
+        self.conn.execute("DELETE FROM share_codes WHERE driver_id=?", (driver_id,))
+        n = self.conn.execute("DELETE FROM viewers WHERE driver_id=?", (driver_id,)).rowcount
+        self.conn.commit()
+        return n
