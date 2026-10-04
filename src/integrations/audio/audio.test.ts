@@ -3,7 +3,7 @@ import { buildSpeakerChain } from '../../features/voice/speakerChain';
 import { VoiceCoordinator } from '../../features/voice/VoiceCoordinator';
 import { ev, flush } from '../../features/voice/testing';
 import { ExpoAudioPlayer, type AudioBackend, type PlayerHandle } from './ExpoAudioPlayer';
-import { ExpoSpeechTts, type SpeechBackend, type SpeechCallbacks } from './ExpoSpeechTts';
+import { ExpoSpeechTts, speechWatchdogMs, type SpeechBackend, type SpeechCallbacks } from './ExpoSpeechTts';
 
 class FakeHandle implements PlayerHandle {
   log: string[] = [];
@@ -169,6 +169,23 @@ describe('ExpoSpeechTts', () => {
     c.abort();
     await p2;
     expect(s2.stops).toBe(1);
+  });
+
+  it('gives up when the phone never reports done, so the voice queue cannot get stuck', async () => {
+    vi.useFakeTimers();
+    try {
+      const s = new FakeSpeech();
+      let settled = false;
+      const p = new ExpoSpeechTts(s).speak('Keep your hands steady.', sig().signal).then(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(speechWatchdogMs('Keep your hands steady.') - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await p;
+      expect(settled).toBe(true);
+      expect(s.stops).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects on a speech error', async () => {

@@ -138,6 +138,26 @@ def create_app(
         if trip and store.get_report(trip_id) is None:
             store.save_report(trip_id, make_report(trip, gemini))
 
+    # Dev-only test feed (DEV_EVENTS=1): POST drive events here and a dev build pulls them into its
+    # running drive, so voice/coaching edge cases can be exercised without driving.
+    dev_events: list[dict] = []
+    dev_enabled = os.environ.get("DEV_EVENTS") == "1"
+
+    @app.post("/dev/events")
+    def push_dev_events(events: list[dict]) -> dict:
+        if not dev_enabled:
+            raise HTTPException(status_code=404)
+        dev_events.extend(events)
+        return {"queued": len(dev_events)}
+
+    @app.get("/dev/events")
+    def pull_dev_events() -> list[dict]:
+        if not dev_enabled:
+            raise HTTPException(status_code=404)
+        taken = list(dev_events)
+        dev_events.clear()
+        return taken
+
     @app.get("/health")
     def health() -> dict:
         return {"ok": True}

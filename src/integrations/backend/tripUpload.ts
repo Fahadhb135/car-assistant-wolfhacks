@@ -116,6 +116,20 @@ export function buildCloudTrip(options: Readonly<{
   };
 }
 
+/**
+ * The cloud stores times as whole epoch milliseconds. IMU event times come from 120 Hz sample
+ * timing (8.33 ms steps), so they carry fractions that made the whole trip fail validation (422).
+ */
+function wholeMilliseconds(trip: CloudTrip): CloudTrip {
+  return {
+    ...trip,
+    start: Math.round(trip.start),
+    end: Math.round(trip.end),
+    events: trip.events.map((event) => ({ ...event, t: Math.round(event.t) })),
+    transcript: trip.transcript.map((turn) => ({ ...turn, t: Math.round(turn.t) })),
+  };
+}
+
 export async function submitTrip(options: Readonly<{
   baseUrl: string;
   trip: CloudTrip;
@@ -127,7 +141,7 @@ export async function submitTrip(options: Readonly<{
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(options.trip),
+      body: JSON.stringify(wholeMilliseconds(options.trip)),
       signal: AbortSignal.timeout(options.timeoutMs ?? 6_000),
     },
   );

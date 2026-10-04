@@ -12,7 +12,7 @@ import type { DriveEventInput, ImuEvent } from './types';
  * events left on the monotonic clock would look hours old and be dropped.
  */
 export function imuEventToDriveEventInput(e: ImuEvent, epochOffsetMs: number): DriveEventInput {
-  const t = e.occurredAtMs + epochOffsetMs;
+  const t = Math.round(e.occurredAtMs + epochOffsetMs); // whole epoch ms, like every other event
   switch (e.kind) {
     case 'crash_candidate':
       return { kind: 'crash', severity: 'critical', confirmed: false, t };
