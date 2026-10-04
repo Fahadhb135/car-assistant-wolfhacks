@@ -1,7 +1,8 @@
 import type { ExpoConfig } from 'expo/config';
 
 const config: ExpoConfig = {
-  name: 'Car Assistant',
+  name: 'DriveWise',
+  icon: './assets/images/icon.png',
   slug: 'car-assistant-wolfhacks',
   version: '0.1.0',
   orientation: 'portrait',
@@ -18,14 +19,14 @@ const config: ExpoConfig = {
       'expo-location',
       {
         locationWhenInUsePermission:
-          'Allow Car Assistant to use your location to warn you about stop signs, traffic lights and highway ramps ahead.',
+          'Allow DriveWise to use your location to warn you about stop signs, traffic lights and highway ramps ahead.',
       },
     ],
     [
       'react-native-ble-plx',
       {
         bluetoothAlwaysPermission:
-          'Allow Car Assistant to connect to the vehicle motion sensor.',
+          'Allow DriveWise to connect to the vehicle motion sensor.',
       },
     ],
   ],

@@ -30,7 +30,7 @@ export async function loadWithFallback<T>(
 
 export function failureMessage(failure: ParentFailure): string {
   switch (failure) {
-    case 'offline': return 'Can’t reach the Car Assistant service. Check your connection and try again.';
+    case 'offline': return 'Can’t reach the DriveWise service. Check your connection and try again.';
     case 'not-found': return 'We couldn’t find that drive.';
     case 'bad-response': return 'The service sent something unexpected. Try again in a moment.';
   }

@@ -39,7 +39,7 @@ def create_app(
     text_stream: Optional[TextStream] = None,
     tts: Optional[Tts] = None,
 ) -> FastAPI:
-    app = FastAPI(title="Car Assistant cloud")
+    app = FastAPI(title="DriveWise cloud")
     store = TripStore(db_path or os.environ.get("TRIPS_DB") or str(CLOUD_DIR / "data" / "trips.db"))
     folder = models_dir or Path(os.environ.get("MODELS_DIR") or CLOUD_DIR / "models")
 
