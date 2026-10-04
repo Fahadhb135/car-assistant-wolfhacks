@@ -1,6 +1,6 @@
 import type { DriveEvent } from '../../core/events/types';
 import { AlertQueue } from './AlertQueue';
-import { alertFromEvent, chatReplyAlert, chatReplyStreamAlert, coachingTipAlert } from './phrases';
+import { alertFromEvent, chatReplyAlert, chatReplyStreamAlert, coachingTipAlert, liveCoachAlert } from './phrases';
 import type { Alert, LiveControl, Speaker, SpokenStream } from './types';
 
 export type VoiceDeps = {
@@ -10,6 +10,8 @@ export type VoiceDeps = {
   onError?: (err: unknown, alert: Alert) => void;
   /** Fires just before an alert is spoken, e.g. so push-to-talk can stop listening for a safety alert. */
   onAlertStart?: (alert: Alert) => void;
+  /** Every admitted drive event (live or replay), e.g. for live coaching and location stamps. */
+  onEvent?: (event: DriveEvent) => void;
 };
 
 /**
@@ -32,6 +34,11 @@ export class VoiceCoordinator {
       if (this.possibleCrashHandled) return;
       this.possibleCrashHandled = true;
     }
+    try {
+      this.deps.onEvent?.(event);
+    } catch (err) {
+      console.warn('[voice] event listener failed', err); // never let a listener block an alert
+    }
     const alert = alertFromEvent(event);
     if (!alert) return; // this event is informational only
     if (alert.kind === 'crash') {
@@ -53,6 +60,12 @@ export class VoiceCoordinator {
   /** Speak the coach's answer to a driver question. Safety alerts still preempt it. */
   speakReply(id: string, text: string): void {
     this.queue.enqueue(chatReplyAlert(id, text, this.now()), this.now());
+    this.pump();
+  }
+
+  /** Speak a live coaching remark (phone voice). Any safety alert still preempts it. */
+  speakCoach(id: string, text: string): void {
+    this.queue.enqueue(liveCoachAlert(id, text, this.now()), this.now());
     this.pump();
   }
 

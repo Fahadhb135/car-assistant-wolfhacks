@@ -29,6 +29,9 @@ export const POLICIES: Record<AlertKind, AlertPolicy> = {
   harsh_cornering: { priority: 46, ttlMs: 5_000, cooldownMs: 20_000 },
   stop_ok: { priority: 20, ttlMs: 4_000, cooldownMs: 15_000 },
   chat_reply: { priority: 30, ttlMs: 15_000, cooldownMs: 0 },
+  // Gemini's on-the-spot remark after a notable moment. Below every safety alert and the driver's
+  // own questions; dropped rather than said late. LiveCoach throttles how often it asks.
+  live_coach: { priority: 25, ttlMs: 8_000, cooldownMs: 0 },
   coaching_tip: { priority: 10, ttlMs: 30_000, cooldownMs: 60_000 },
 };
 
@@ -149,6 +152,19 @@ export function chatReplyAlert(id: string, text: string, now: number): Alert {
     kind: 'chat_reply',
     priority: policy.priority,
     utterance: text === REPLY_FALLBACK_TEXT ? { text, phraseId: 'reply_fallback' } : { text },
+    createdAt: now,
+    ttlMs: policy.ttlMs,
+  };
+}
+
+/** A live coaching remark from Gemini, spoken with the phone's built-in voice for speed. */
+export function liveCoachAlert(id: string, text: string, now: number): Alert {
+  const policy = POLICIES.live_coach;
+  return {
+    id,
+    kind: 'live_coach',
+    priority: policy.priority,
+    utterance: { text, deviceVoice: true },
     createdAt: now,
     ttlMs: policy.ttlMs,
   };

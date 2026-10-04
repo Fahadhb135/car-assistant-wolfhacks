@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type { DriveEvent } from '../../core/events/types';
+import type { GpsFix } from '../../core/location/types';
 import type { VoiceCoordinator } from '../voice/VoiceCoordinator';
 import { CLEAR_ROAD, coachMessage, type CoachMessage } from './coachMessage';
 import { createReplaySession } from './createReplaySession';
@@ -17,7 +18,11 @@ const CALM_AFTER_MS = 8_000;
 export function useReplayDrive(
   enabled: boolean,
   voice: Pick<VoiceCoordinator, 'handleEvent'>,
+  /** Each replayed fix, before it is coached (live coaching context and event locations). */
+  onFix?: (fix: GpsFix) => void,
 ): { coach: CoachMessage; finished: boolean; eventsRef: React.MutableRefObject<DriveEvent[]> } {
+  const onFixRef = useRef(onFix);
+  onFixRef.current = onFix;
   const [coach, setCoach] = useState<CoachMessage>(CLEAR_ROAD);
   const [finished, setFinished] = useState(false);
   const calmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -54,6 +59,7 @@ export function useReplayDrive(
           setCoach(FINISHED);
           return;
         }
+        onFixRef.current?.(fix);
         session.onFix(fix);
       }, 1000);
     });

@@ -10,6 +10,8 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .chat import ChatFn, ChatRequest, ChatResponse, answer, chat_from_env
+from .coach import CoachRequest, CoachResponse, coach_line
+from .driver_stats import driver_stats, rows_from_payloads
 from .chat_stream import TextStream, chat_text_stream_from_env, stream_reply
 from .tts import Tts
 from .databricks_sink import DatabricksSink
@@ -23,6 +25,7 @@ from .schemas import Hotspot, HotspotSnapshot, ModelInfo, Report, Trip
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 
 CLOUD_DIR = Path(__file__).resolve().parent.parent  # defaults live under cloud/ however we're launched
+COACHING_TTL_S = 600  # re-read Databricks' coaching context at most this often
 
 
 
@@ -102,6 +105,33 @@ def create_app(
         assert sink is not None
         raw = json.loads(sink.read_file("publish/hotspots.json"))
         return HotspotSnapshot.model_validate({**raw, "source": "databricks"})
+
+    def current_hotspots() -> list[dict]:
+        snap = store.load_hotspots()
+        model = HotspotSnapshot.model_validate(snap) if snap and snap.get("source") == "databricks" else local_snapshot()
+        return [h.model_dump() for h in model.hotspots]
+
+    # Driver history + risky spots for live coaching and the score screen. Databricks publishes it
+    # (02_analytics -> publish/coaching_context.json); it is cached so a coaching request never waits
+    # on Databricks, and the local trips fill in anything Databricks has not processed yet.
+    coaching_cache: dict = {"value": None, "loaded_at": 0.0}
+
+    def coaching_context(force: bool = False) -> dict:
+        now = time.time()
+        cached = coaching_cache["value"]
+        if sink is not None and (force or cached is None or now - coaching_cache["loaded_at"] > COACHING_TTL_S):
+            coaching_cache["loaded_at"] = now  # also throttles retries while Databricks is down
+            try:
+                raw = json.loads(sink.read_file("publish/coaching_context.json"))
+                cached = {"source": "databricks", "generatedAt": raw.get("generatedAt"),
+                          "drivers": raw.get("drivers") or {}, "riskyLocations": raw.get("riskyLocations") or []}
+                coaching_cache["value"] = cached
+            except Exception as exc:
+                logging.getLogger("cloud").warning("databricks coaching context unavailable: %s", exc)
+        local = driver_stats(*rows_from_payloads(store.all_trips()))
+        if cached is None:
+            return {"source": "local", "generatedAt": int(now * 1000), "drivers": local, "riskyLocations": []}
+        return {**cached, "drivers": {**local, **cached["drivers"]}}
 
     def build_report(trip_id: str) -> None:
         trip = store.get_trip(trip_id)
@@ -184,6 +214,27 @@ def create_app(
     @app.post("/chat", response_model=ChatResponse)
     def post_chat(req: ChatRequest) -> ChatResponse:
         return ChatResponse(reply=answer(req, chat))
+
+    @app.post("/coach", response_model=CoachResponse)
+    def post_coach(req: CoachRequest) -> CoachResponse:
+        """One live coaching line for a notable moment: the phone's live context plus the driver's
+        history and the crowd data around that spot, written by Gemini as text for the phone's voice."""
+        ctx = coaching_context()
+        stats = ctx["drivers"].get(req.driverId)
+        return CoachResponse(text=coach_line(req, chat, stats, current_hotspots(), ctx["riskyLocations"]))
+
+    @app.get("/drivers/{driver_id}/stats")
+    def get_driver_stats(driver_id: str) -> dict:
+        """The driver's history for the score screen (Databricks, with local trips filling gaps)."""
+        ctx = coaching_context()
+        return {"source": ctx["source"], "generatedAt": ctx["generatedAt"], "stats": ctx["drivers"].get(driver_id)}
+
+    @app.post("/admin/coaching/refresh")
+    def refresh_coaching(request: Request, x_admin_token: Optional[str] = Header(default=None)) -> dict:
+        """Re-read the coaching context Databricks published, e.g. right after 02_analytics ran."""
+        check_admin(request, x_admin_token)
+        ctx = coaching_context(force=True)
+        return {"source": ctx["source"], "drivers": len(ctx["drivers"]), "riskyLocations": len(ctx["riskyLocations"])}
 
     @app.post("/chat/stream")
     async def post_chat_stream(req: ChatRequest) -> StreamingResponse:

@@ -1,3 +1,4 @@
+import type { DriveEvent } from '../../core/events/types';
 import { ExpoAudioPlayer } from '../../integrations/audio/ExpoAudioPlayer';
 import { ExpoSpeechTts } from '../../integrations/audio/ExpoSpeechTts';
 import { configureAlertAudioSession, expoAudioBackend, expoSpeechBackend } from '../../integrations/audio/expoBackends';
@@ -14,6 +15,7 @@ const NO_LIVE: LiveControl = { isActive: () => false, pause() {}, resume() {}, e
 export function createVoice(
   onError: (err: unknown) => void = (e) => console.warn('[voice]', e),
   onAlertStart?: (alert: Alert) => void,
+  onEvent?: (event: DriveEvent) => void,
 ): VoiceCoordinator {
   void configureAlertAudioSession().catch(onError);
   const player = new ExpoAudioPlayer(expoAudioBackend);
@@ -25,5 +27,5 @@ export function createVoice(
     new ExpoSpeechTts(expoSpeechBackend),
     [new ServerTtsSpeaker(player, { baseUrl: process.env.EXPO_PUBLIC_API_URL })],
   );
-  return new VoiceCoordinator({ speaker, live: NO_LIVE, onError, onAlertStart });
+  return new VoiceCoordinator({ speaker, live: NO_LIVE, onError, onAlertStart, onEvent });
 }

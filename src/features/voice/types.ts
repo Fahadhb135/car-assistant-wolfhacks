@@ -14,6 +14,7 @@ export type AlertKind =
   | 'harsh_cornering'
   | 'stop_ok'
   | 'chat_reply'
+  | 'live_coach'
   | 'coaching_tip';
 
 /** One sentence of a streamed reply: its text, plus server-made audio when available. */
@@ -29,6 +30,8 @@ export type Utterance = {
   phraseId?: string;
   /** Set for streamed chat replies; spoken sentence by sentence as they arrive. */
   stream?: SpokenStream;
+  /** Speak with the phone's built-in voice right away (live coaching: lowest latency). */
+  deviceVoice?: boolean;
 };
 
 export type Alert = {

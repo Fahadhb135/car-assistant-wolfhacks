@@ -1,15 +1,23 @@
 import { useEffect, useRef } from 'react';
 
+import type { DriveEvent } from '../../core/events/types';
 import { createVoice } from '../voice/createVoice';
 import type { VoiceCoordinator } from '../voice/VoiceCoordinator';
 import type { Alert } from '../voice/types';
 
 /** One voice coordinator for the drive screen's lifetime, shared by coaching alerts and the chat. */
-export function useDriveVoice(onAlertStart?: (alert: Alert) => void): VoiceCoordinator {
+export function useDriveVoice(
+  onAlertStart?: (alert: Alert) => void,
+  onEvent?: (event: DriveEvent) => void,
+): VoiceCoordinator {
   const cb = useRef(onAlertStart);
   cb.current = onAlertStart;
+  const eventCb = useRef(onEvent);
+  eventCb.current = onEvent;
   const ref = useRef<VoiceCoordinator | null>(null);
-  if (!ref.current) ref.current = createVoice(undefined, (a) => cb.current?.(a));
+  if (!ref.current) {
+    ref.current = createVoice(undefined, (a) => cb.current?.(a), (e) => eventCb.current?.(e));
+  }
   useEffect(() => () => ref.current?.interruptChat(), []);
   return ref.current;
 }

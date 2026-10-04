@@ -23,6 +23,7 @@ export class ServerTtsSpeaker implements Speaker {
     const { baseUrl } = this.opts;
     if (!baseUrl) throw new SpeakerUnavailableError('no cloud service configured');
     if (utterance.stream) throw new SpeakerUnavailableError('streamed reply');
+    if (utterance.deviceVoice) throw new SpeakerUnavailableError('device voice requested');
     if (signal.aborted) return;
     // The alert's abort or the timeout, whichever comes first (no AbortSignal.any on Hermes).
     const ctrl = new AbortController();

@@ -7,12 +7,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { CoachMessage } from '@/features/driving-session/coachMessage';
 import { CoachChatBar } from '@/features/driving-session/CoachChatBar';
-import {
-  createTripId,
-  getAnonymousDriverId,
-  saveTrip,
-  uploadStoredTrip,
-} from '@/features/driving-session/tripStore';
+import { DriveContext } from '@/features/driving-session/DriveContext';
+import { getDriverId } from '@/features/driving-session/driverId';
+import type { LiveCoach } from '@/features/driving-session/LiveCoach';
+import { createTripId, saveTrip, uploadStoredTrip } from '@/features/driving-session/tripStore';
+import { historyLine, scoreSummary, useDriverStats, useLiveCoach } from '@/features/driving-session/useDriveCoaching';
 import { useCoachChat, type CoachChatApi } from '@/features/driving-session/useCoachChat';
 import { useDriveVoice } from '@/features/driving-session/useDriveVoice';
 import { useLiveImuDrive } from '@/features/driving-session/useLiveImuDrive';
@@ -20,7 +19,7 @@ import { SpeedBadge } from '@/features/driving-session/SpeedBadge';
 import { useLiveLocation, type LiveLocationStatus } from '@/features/driving-session/useLiveLocation';
 import { useReplayDrive } from '@/features/driving-session/useReplayDrive';
 import { POLICIES } from '@/features/voice/phrases';
-import { buildCloudTrip } from '@/integrations/backend/tripUpload';
+import { buildCloudTrip, smoothnessScore } from '@/integrations/backend/tripUpload';
 import { colors } from '@/theme';
 
 /** Card tint per coaching tone (calm keeps the original cream). */
@@ -59,20 +58,35 @@ export default function DriveRoute() {
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [ending, setEnding] = useState(false);
   const startedAtRef = useRef(Date.now());
+  const [driverId] = useState(getDriverId);
+  // Where the car is and was: stamps every event for the upload and feeds live coaching.
+  const [driveContext] = useState(() => new DriveContext());
+  const liveCoachRef = useRef<LiveCoach | null>(null);
   // A safety alert (anything outranking a chat reply) stops the passenger's listening, so the alert is heard cleanly.
   const chatRef = useRef<CoachChatApi | null>(null);
   const voice = useDriveVoice(
     (alert) => alert.priority > POLICIES.chat_reply.priority && chatRef.current?.cancel(),
+    (event) => {
+      driveContext.stamp(event);
+      liveCoachRef.current?.onEvent(event);
+    },
   );
-  const replay = useReplayDrive(replayMode, voice);
+  const replay = useReplayDrive(replayMode, voice, (fix) => driveContext.updateFix(fix));
   const live = useLiveImuDrive(!replayMode, deviceId, voice);
-  const location = useLiveLocation(!replayMode, live.eventSink);
+  const location = useLiveLocation(!replayMode, live.eventSink, (fix, limitMps, road) =>
+    driveContext.updateFix(fix, limitMps, road));
   const getEvents = useCallback(
     () => (replayMode ? replay.eventsRef.current : live.eventsRef.current),
     [live.eventsRef, replay.eventsRef, replayMode],
   );
   const chat = useCoachChat(voice, getEvents);
   chatRef.current = chat;
+  liveCoachRef.current = useLiveCoach(voice, driveContext, getEvents, driverId, startedAtRef.current);
+  const driverStats = useDriverStats(driverId);
+  // Re-read every second (the timer re-renders), so the score follows the drive live.
+  const tripScore = smoothnessScore(getEvents());
+  const summary = scoreSummary(tripScore);
+  const history = historyLine(driverStats);
   const coach = replayMode ? replay.coach : live.coach;
   const sensorValue = replayMode
     ? 'Replay'
@@ -95,10 +109,12 @@ export default function DriveRoute() {
     const tripId = createTripId(endedAt);
     const trip = buildCloudTrip({
       tripId,
-      driverId: getAnonymousDriverId(),
+      driverId,
       start: startedAtRef.current,
       end: endedAt,
       events: getEvents(),
+      stampFor: driveContext.stampFor,
+      transcript: driveContext.transcript(),
     });
     saveTrip(trip);
     const upload = uploadStoredTrip(tripId, process.env.EXPO_PUBLIC_API_URL);
@@ -129,16 +145,17 @@ export default function DriveRoute() {
           </View>
         </View>
 
-        <View style={styles.scoreSection} accessibilityLabel="Smoothness score 92 out of 100">
+        <View style={styles.scoreSection} accessibilityLabel={`Smoothness score ${tripScore} out of 100`}>
           <Text variant="labelLarge" style={styles.overline}>DRIVING SMOOTHNESS</Text>
           <View style={styles.scoreRing}>
             <View style={styles.scoreRingInner}>
-              <Text style={styles.score}>92</Text>
+              <Text style={styles.score}>{tripScore}</Text>
               <Text variant="labelLarge" style={styles.outOf}>OUT OF 100</Text>
             </View>
           </View>
-          <Text variant="headlineSmall" style={styles.state}>Smooth driving</Text>
-          <Text variant="bodyLarge" style={styles.stateDetail}>Steady speed and clean turns.</Text>
+          <Text variant="headlineSmall" style={styles.state}>{summary.label}</Text>
+          <Text variant="bodyLarge" style={styles.stateDetail}>{summary.detail}</Text>
+          {history ? <Text variant="bodySmall" style={styles.history}>{history}</Text> : null}
         </View>
 
         <Surface style={[styles.coachCard, { backgroundColor: TONE_BACKGROUND[coach.tone] }]} elevation={0}>
@@ -250,6 +267,7 @@ const styles = StyleSheet.create({
   outOf: { color: '#8FA99A', fontWeight: '700', letterSpacing: 1.2 },
   state: { color: colors.white, fontWeight: '800', marginTop: 20 },
   stateDetail: { color: '#AFC0B6', marginTop: 4 },
+  history: { color: '#8FA99A', marginTop: 8 },
   coachCard: { alignItems: 'center', backgroundColor: colors.cream, borderRadius: 22, flexDirection: 'row', gap: 16, padding: 18 },
   coachIcon: { alignItems: 'center', backgroundColor: colors.mint, borderRadius: 24, height: 48, justifyContent: 'center', width: 48 },
   coachIconText: { color: colors.forest, fontSize: 25, fontWeight: '700' },

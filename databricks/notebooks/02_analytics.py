@@ -66,3 +66,21 @@ out = f"/Volumes/{CAT}/{SCH}/{VOL}/publish/hotspots.json"
 dbutils.fs.mkdirs(os.path.dirname(out))
 dbutils.fs.put(out, json.dumps(snapshot), True)
 print(f"published {len(snapshot['hotspots'])} hotspots (demo={snapshot['demo']}) to {out}")
+
+# COMMAND ----------
+# Publish the live-coaching context: per-driver history and the top risky spots. The cloud service
+# reads publish/coaching_context.json (cached, POST /admin/coaching/refresh to reload now) and adds
+# it to every on-the-spot Gemini coaching call and to the driver score screen. The aggregation lives
+# in cloud/app/driver_stats.py (unit-tested, shared with the service's local fallback).
+from app.driver_stats import driver_stats
+
+trip_rows = [r.asDict() for r in spark.table(f"{CAT}.{SCH}.trips")
+             .select("driverId", "tripId", "startMs", "smoothness").collect()]
+event_rows = [r.asDict() for r in spark.table(f"{CAT}.{SCH}.events").select("tripId", "kind").collect()]
+risky = [r.asDict() for r in spark.table(f"{CAT}.{SCH}.risky_locations")
+         .select("lat", "lon", "badEvents", "trips", "drivers", "ranStops", "rollingStops")
+         .where("drivers >= 2").limit(200).collect()]
+context = {"generatedAt": int(time.time() * 1000), "drivers": driver_stats(trip_rows, event_rows), "riskyLocations": risky}
+out = f"/Volumes/{CAT}/{SCH}/{VOL}/publish/coaching_context.json"
+dbutils.fs.put(out, json.dumps(context, default=float), True)
+print(f"published coaching context for {len(context['drivers'])} drivers, {len(risky)} risky spots to {out}")

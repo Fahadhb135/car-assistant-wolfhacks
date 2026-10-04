@@ -49,7 +49,8 @@ def base_dir() -> str:
 # repo path -> workspace path (relative to base_dir)
 FILES = (
     [(p, p) for p in sorted((ROOT / "databricks" / "lib").glob("*.py"))]
-    + [(ROOT / "cloud" / "app" / "__init__.py", None), (ROOT / "cloud" / "app" / "hotspots.py", None)]
+    + [(ROOT / "cloud" / "app" / "__init__.py", None), (ROOT / "cloud" / "app" / "hotspots.py", None),
+       (ROOT / "cloud" / "app" / "driver_stats.py", None)]
     + [(p, p) for p in sorted((ROOT / "databricks" / "notebooks").glob("*.py"))]
 )
 
