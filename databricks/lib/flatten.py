@@ -44,6 +44,10 @@ def flatten_trip(trip: dict) -> tuple[dict, list[dict], list[dict]]:
             "isBad": e["kind"] in BAD_KINDS,
             "lat": e.get("lat"),
             "lon": e.get("lon"),
+            "speedMps": e.get("speedMps"),
+            "limitMps": e.get("limitMps"),
+            "road": e.get("road"),
+            "detailJson": json.dumps(e.get("detail"), sort_keys=True) if e.get("detail") else None,
             "score": e.get("score"),
             "confirmed": e.get("confirmed"),
             "evidenceJson": json.dumps(e.get("evidence"), sort_keys=True) if e.get("evidence") else None,
@@ -56,3 +60,12 @@ def flatten_trip(trip: dict) -> tuple[dict, list[dict], list[dict]]:
         for i, row in enumerate(trip.get("features") or [])
     ]
     return trip_row, event_rows, feature_rows
+
+
+def transcript_rows(trip: dict) -> list[dict]:
+    """What was said during the drive: the live coach's remarks and push-to-talk Q&A."""
+    return [
+        {"tripId": trip["tripId"], "driverId": trip["driverId"], "turnIdx": i, "tMs": turn["t"],
+         "role": turn["role"], "text": turn["text"]}
+        for i, turn in enumerate(trip.get("transcript") or [])
+    ]
