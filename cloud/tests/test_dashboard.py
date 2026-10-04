@@ -62,11 +62,11 @@ class FakeDatabricks:
 
 
 TRIP_COLS = ["tripId", "driverId", "startMs", "endMs", "durationS", "smoothness", "stopCompliance", "nEvents",
-             "nBadEvents", "hadCrash"]
+             "nBadEvents", "hadCrash", "nSpeeding", "distanceM"]
 EVENT_COLS = ["eventId", "tMs", "kind", "isBad", "lat", "lon", "speedMps", "limitMps", "road", "score",
               "confirmed", "detailJson"]
 TABLES = {
-    "trips": (TRIP_COLS, [["t1", "maya", "1000", "601000", "600", "90.0", "0.5", "2", "1", "false"]]),
+    "trips": (TRIP_COLS, [["t1", "maya", "1000", "601000", "600", "90.0", "0.5", "2", "1", "false", "0", None]]),
     "events": (EVENT_COLS, [
         ["e1", "5000", "stop_ok", "false", None, None, None, None, None, None, None, None],
         ["e2", "9000", "rolling_stop", "true", "35.78", "-78.63", "2.0", "11.2", "Wilmington St", None, None,

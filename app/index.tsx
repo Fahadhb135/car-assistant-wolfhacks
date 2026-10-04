@@ -1,12 +1,21 @@
 import { router } from 'expo-router';
+import { useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { Button, Card, Divider, Surface, Text } from 'react-native-paper';
+import { ActivityIndicator, Button, Card, Divider, Surface, Text } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { getDriverId } from '@/features/driving-session/driverId';
+import { historyLine, useDriverStats } from '@/features/driving-session/useDriveCoaching';
 import { getParentSession } from '@/features/parent-dashboard/parentSession';
+import { minutes, stopsLabel, tripDateLabel } from '@/features/trips/tripView';
+import { useRecentTrips } from '@/features/trips/useTripData';
 import { colors } from '@/theme';
 
 export default function HomeRoute() {
+  const [driverId] = useState(getDriverId);
+  const recent = useRecentTrips(driverId);
+  const history = historyLine(useDriverStats(driverId));
+  const trips = recent.data?.trips ?? [];
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -56,27 +65,51 @@ export default function HomeRoute() {
         </Button>
 
         <View style={styles.sectionHeader}>
-          <Text variant="titleLarge" style={styles.sectionTitle}>Last drive</Text>
-          <Button compact mode="text" onPress={() => router.push('/trips/demo')}>View report</Button>
+          <Text variant="titleLarge" style={styles.sectionTitle}>Recent drives</Text>
+          {recent.loading ? <ActivityIndicator size="small" /> : (
+            <Button compact mode="text" onPress={recent.reload}>Refresh</Button>
+          )}
         </View>
+        {history ? <Text variant="bodySmall" style={styles.muted}>{history}</Text> : null}
 
-        <Card style={styles.tripCard} mode="contained" onPress={() => router.push('/trips/demo')}>
-          <Card.Content style={styles.tripContent}>
-            <View style={styles.scoreBlock}>
-              <Text variant="displaySmall" style={styles.score}>88</Text>
-              <Text variant="labelMedium" style={styles.muted}>DRIVE SCORE</Text>
-            </View>
-            <Divider style={styles.verticalDivider} />
-            <View style={styles.tripDetails}>
-              <Text variant="titleMedium">Campus loop</Text>
-              <Text variant="bodyMedium" style={styles.muted}>Today · 24 min · 8.4 mi</Text>
-              <View style={styles.goodRow}>
-                <View style={styles.smallDot} />
-                <Text variant="labelMedium" style={styles.goodText}>Smooth and attentive</Text>
+        {trips.length === 0 ? (
+          <Card style={styles.tripCard} mode="contained">
+            <Card.Content>
+              <Text variant="bodyMedium" style={styles.muted}>
+                {recent.loading
+                  ? 'Loading your drives from Databricks…'
+                  : recent.failed
+                    ? 'Could not reach the cloud service. Check that it is running and on the same Wi-Fi.'
+                    : 'No drives yet. Finish a drive and it shows up here.'}
+              </Text>
+            </Card.Content>
+          </Card>
+        ) : trips.map((trip) => (
+          <Card key={trip.tripId} style={styles.tripCard} mode="contained" onPress={() => router.push(`/trips/${trip.tripId}`)}>
+            <Card.Content style={styles.tripContent}>
+              <View style={styles.scoreBlock}>
+                <Text variant="displaySmall" style={styles.score}>
+                  {trip.smoothness === null ? '—' : Math.round(trip.smoothness)}
+                </Text>
+                <Text variant="labelMedium" style={styles.muted}>DRIVE SCORE</Text>
               </View>
-            </View>
-          </Card.Content>
-        </Card>
+              <Divider style={styles.verticalDivider} />
+              <View style={styles.tripDetails}>
+                <Text variant="titleMedium">{tripDateLabel(trip.start)}</Text>
+                <Text variant="bodyMedium" style={styles.muted}>
+                  {minutes(trip)} min{trip.distanceM ? ` · ${(trip.distanceM / 1609.344).toFixed(1)} mi` : ''}
+                  {` · stops ${stopsLabel(trip)}`}
+                </Text>
+                <View style={styles.goodRow}>
+                  <View style={[styles.smallDot, trip.pending && styles.pendingDot]} />
+                  <Text variant="labelMedium" style={trip.pending ? styles.pendingText : styles.goodText}>
+                    {trip.pending ? 'Syncing to Databricks…' : 'From Databricks'}
+                  </Text>
+                </View>
+              </View>
+            </Card.Content>
+          </Card>
+        ))}
 
         <Surface style={styles.privacyNote} elevation={0}>
           <Text variant="titleMedium">Designed for the road</Text>
@@ -149,6 +182,8 @@ const styles = StyleSheet.create({
   goodRow: { alignItems: 'center', flexDirection: 'row', gap: 6, marginTop: 3 },
   smallDot: { backgroundColor: colors.leaf, borderRadius: 4, height: 8, width: 8 },
   goodText: { color: colors.leaf, fontWeight: '700' },
+  pendingDot: { backgroundColor: colors.amber },
+  pendingText: { color: colors.muted, fontWeight: '700' },
   privacyNote: { backgroundColor: colors.mint, borderRadius: 20, gap: 6, padding: 18 },
   privacyCopy: { color: colors.muted, lineHeight: 21 },
   diagnostics: { alignSelf: 'center', marginTop: 2 },

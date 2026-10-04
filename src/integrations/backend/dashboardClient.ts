@@ -8,6 +8,7 @@ export type TripRow = Readonly<{
   stopCompliance: number | null;
   nEvents: number;
   nBadEvents: number;
+  distanceM: number | null;
   /** True until the Databricks ingest job has picked the trip up. */
   pending: boolean;
 }>;
@@ -53,6 +54,7 @@ export function parseTripRow(v: unknown, pending?: boolean): TripRow | null {
     stopCompliance: num(r.stopCompliance),
     nEvents: num(r.nEvents) ?? 0,
     nBadEvents: num(r.nBadEvents) ?? 0,
+    distanceM: num(r.distanceM),
     pending: pending ?? r.pending === true,
   };
 }

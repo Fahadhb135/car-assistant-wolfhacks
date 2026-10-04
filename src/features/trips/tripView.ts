@@ -81,6 +81,7 @@ export function summaryFromCloudTrip(trip: CloudTrip): TripSummary {
       end: trip.end,
       smoothness: trip.scores.smoothness ?? null,
       stopCompliance: trip.scores.stopCompliance ?? null,
+      distanceM: trip.scores.distanceM ?? null,
       nEvents: trip.events.length,
       nBadEvents: trip.events.filter((e) =>
         ['crash', 'ran_stop', 'rolling_stop', 'erratic_driving', 'hard_braking', 'rapid_acceleration', 'harsh_cornering'].includes(e.kind)).length,
