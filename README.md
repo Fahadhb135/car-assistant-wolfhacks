@@ -1,12 +1,14 @@
 # DriveWise (WolfHacks)
 
+AI-Assistance was used in the development of this project.
+
 An AI driving coach built on the **STMicroelectronics SensorTile.box**. A dash-mounted sensor streams motion data over Bluetooth to a phone. The phone app runs the ML on-device, detects crashes and erratic driving, tracks the car against live map data, and a voice coach speaks up when you need it ("Stop sign ahead, start slowing down"). After each trip, a small Python cloud service analyzes the drive with Gemini and feeds Databricks for long-term analysis and model retraining.
 
 **Design rule:** anything that must react while you are driving runs on the phone. Anything that can wait until the trip ends runs in the Python cloud service.
 
 Track: **Applied AI Hardware+**. Collect, analyze and act on real sensor data; detect patterns/anomalies; deploy ML to edge/IoT devices.
 
-> Status: the Expo app can select a STEVAL-MKBOXPRO, decode its DATALOG2 v3.4 accelerometer/gyroscope stream, calibrate its mounted vehicle frame, and run the pure-TypeScript IMU pipeline with conservative event arbitration. Live IMU and location events share a per-drive gate: the first unconfirmed possible crash takes precedence and starts 15 seconds of quiet mode, while passive GPS/BLE/timer/end controls continue. Non-crash IMU coaching is globally limited to one candidate per 15 seconds; a sustained deceleration beyond 1.2 g also counts as a possible crash. Thresholds and provisional scale factors still require physical iPhone/SensorTile validation (see [the IMU pipeline guide](docs/imu-pipeline.md)). Ending a drive keeps a retryable in-app trip and posts it to the FastAPI service, which starts Gemini report generation and Databricks synchronization. Live drives also run foreground GPS location coaching for speeding, stop signs, traffic lights, and highway entry/exit using OpenStreetMap. The location modules, voice alert queue, bundled ElevenLabs audio, streamed push-to-talk Gemini chat, crowd hotspots, cloud service, and Databricks pipeline are implemented; replay mode runs the coaching and voice path offline on a bundled route. The home screen's "Last drive" and a Dashboard (past drives, score and stop trends, speeding report) show this phone's own drives, read from Databricks through the cloud service (see Section 9).
+> Status: the Expo app can select a STEVAL-MKBOXPRO, decode its DATALOG2 v3.4 accelerometer/gyroscope stream, calibrate its mounted vehicle frame, and run the pure-TypeScript IMU pipeline with conservative event arbitration. Live IMU and location events share a per-drive gate: the first unconfirmed possible crash takes precedence and starts 15 seconds of quiet mode, while passive GPS/BLE/timer/end controls continue. Only a possible crash quiets the drive; other IMU events have no shared cooldown (each kind waits 2 s before repeating), and a sustained deceleration beyond 1.2 g also counts as a possible crash. Detection can be tuned live in the car from the drive screen's **Tune** panel. Thresholds and provisional scale factors still require physical iPhone/SensorTile validation (see [the IMU pipeline guide](docs/imu-pipeline.md)). Ending a drive keeps a retryable in-app trip and posts it to the FastAPI service, which starts Gemini report generation and Databricks synchronization. Live drives also run foreground GPS location coaching for speeding, stop signs, traffic lights, and highway entry/exit using OpenStreetMap. The location modules (including stop compliance), voice alert queue, bundled ElevenLabs audio, live Gemini coaching remarks, a live driver score, streamed Gemini chat (tap-to-ask), crowd hotspots on live drives, cloud service, and Databricks pipeline are implemented; replay mode runs the coaching and voice path offline on a bundled route. The home screen's "Last drive" and a Dashboard (past drives, score and stop trends, speeding report) show this phone's own drives, read from Databricks through the cloud service (see Section 9).
 
 ---
 
@@ -72,19 +74,19 @@ The system has two halves.
 | Component | Tech | Responsibility |
 |---|---|---|
 | Sensor | SensorTile.box, **stock ST firmware** | Stream accelerometer + gyroscope over BLE |
-| Mobile app | React Native (Expo dev build), `react-native-ble-plx`, `expo-location`, `expo-av`, `expo-sqlite` | Everything at runtime: BLE, signal processing, inference, coaching, UI, audio, storage |
-| On-device ML | ONNX via `onnxruntime-react-native`, or plain TypeScript for a small model | Erratic-driving inference |
+| Mobile app | React Native (Expo dev build), `react-native-ble-plx`, `expo-location`, `expo-audio`, `expo-speech`, `expo-file-system`, `expo-keep-awake` | Everything at runtime: BLE, signal processing, detection, coaching, UI, audio, storage |
+| On-device detection | Plain TypeScript heuristics today (`src/core/imu/`); an ONNX model via `onnxruntime-react-native` is planned | Crash, swerve, braking, acceleration and cornering detection |
 | Training (offline) | Python, NumPy, scikit-learn, Jupyter | Feature design, first model, evaluation, export |
 | Cloud service | Python, FastAPI, hosted (free tier or laptop on hotspot for the demo) | Trip ingest, Gemini post-trip analysis, token minting, model distribution |
 | Long-term analysis | Databricks (Delta tables, notebooks, dashboards) | Trends, risky-location analysis, pooled-drive retraining, model export |
 | Map data | OpenStreetMap Overpass API (called from the phone) | Stop signs, traffic lights, and highway/ramp geometry with speed limits, in 1-mile tiles |
-| Voice out | ElevenLabs TTS | Spoken alerts and coaching |
-| Voice in / chat | Gemini Live API (phone connects directly) | Hands-free conversation and live transcript |
+| Voice out | ElevenLabs: bundled clips for fixed phrases; other text through the cloud's `POST /tts` | Spoken alerts and coaching |
+| Voice in / chat | Gemini through the cloud service (`POST /chat/stream`, `POST /coach`); Gemini Live is not built | Chat replies and live coaching remarks |
 | Post-trip analysis | Gemini API (called from the cloud service) | Trip reports, coaching summaries, weekly trends in plain language |
 
 Notes:
 - Expo Go cannot do BLE. The app needs a **dev build** (`expo run:ios` / `run:android` or EAS).
-- **Keys:** the Gemini API key lives only on the cloud service. The phone gets a short-lived Gemini Live token from it. ElevenLabs is called from the phone for latency, with its key in app config for the hackathon; route it through the service if time allows.
+- **Keys:** the Gemini, ElevenLabs and Databricks keys live only on the cloud service. The phone plays bundled ElevenLabs clips and asks the service (`POST /tts`) to voice any other text, falling back to the phone's own voice.
 - Confirm that the Gemini Live SDK version supports ephemeral tokens before relying on this. If not, proxy the Live session through the cloud service instead.
 
 ---
@@ -93,16 +95,16 @@ Notes:
 
 1. **Sensor to phone.** The SensorTile.box streams IMU packets over BLE. The app parses ST's characteristic format into `{t, ax, ay, az, gx, gy, gz}`.
 2. **Calibrate.** At the start of a trip, estimate the gravity vector and rotate samples into vehicle axes (forward / lateral / vertical).
-3. **Crash check.** Every sample goes through the threshold crash detector (see 6.1). A `crash_candidate` has same-sample precedence over maneuvers and maps to an app-wide `crash` with `confirmed: false`. The first possible crash is spoken once, then a monotonic per-drive gate suppresses automatic event retention, warning-card changes, and speech for 15 seconds. Real-data tuning is follow-up work.
-4. **Detect maneuvers.** Timestamp windows produce `swerve_candidate`; calibrated vehicle-frame samples produce deterministic hard-braking, rapid-acceleration, and harsh-corner candidates. Overlaps are resolved by fixed priority, and one global 15-second cooldown applies across every non-crash IMU kind. Behavior thresholds apply to a low-pass-filtered signal; see [the IMU pipeline guide](docs/imu-pipeline.md) for the current values. Suppression counters and cooldown state are exposed for diagnosis. A later on-device model can consume the same features after real drives are collected and evaluated.
-5. **Location coach.** GPS plus heading are matched against cached map data (see Section 7). Emits `stop_sign_ahead`, `traffic_light_ahead`, `highway_entering`, `highway_exiting` and `speeding` events (implemented), and stop-compliance events `stop_ok` / `rolling_stop` / `ran_stop` (planned).
+3. **Crash check.** Every sample goes through the crash checks (see 6.1). A `crash_candidate` has same-sample precedence over maneuvers and maps to an app-wide `crash` with `confirmed: false`. The first possible crash is spoken once, then a monotonic per-drive gate suppresses automatic event retention, warning-card changes, and speech for 15 seconds. Real-data tuning is follow-up work.
+4. **Detect maneuvers.** Timestamp windows produce `swerve_candidate`; calibrated vehicle-frame samples produce deterministic hard-braking, rapid-acceleration, and harsh-corner candidates. Overlaps are resolved by fixed priority; there is no shared cooldown between kinds, only a 2-second wait before the same kind repeats. Behavior thresholds apply to a low-pass-filtered signal; see [the IMU pipeline guide](docs/imu-pipeline.md) for the current values. Suppression counters and cooldown state are exposed for diagnosis. A later on-device model can consume the same features after real drives are collected and evaluated.
+5. **Location coach.** GPS plus heading are matched against cached map data (see Section 7). Emits `stop_sign_ahead`, `traffic_light_ahead`, `highway_entering`, `highway_exiting`, `speeding`, and the stop-compliance events `stop_ok` / `rolling_stop` / `ran_stop`.
 6. **Speak.** Events go to a priority queue, then ElevenLabs (cached audio for fixed phrases), plus a local notification and on-screen banner.
-7. **Talk back.** The driver can speak to the assistant through Gemini Live ("how was that turn?"). The phone fetches a short-lived token from the cloud service and connects directly. Trip context is passed in so answers are specific. Transcripts are stored with the trip.
-8. **Store.** Live IMU events and a score are retained in the in-app trip store. Durable storage, location events, features and chat transcripts still need to be added to live-trip serialization.
+7. **Coach and talk back.** After a notable moment, the phone sends the moment and the drive's context to the cloud's `POST /coach`, and Gemini writes one short coaching remark (at most one every 45 s), spoken after any alert clip. The driver can also ask questions with tap-to-ask chips; replies stream from `POST /chat/stream`. Hold-to-talk is hidden because no on-device speech recognizer is installed yet, and Gemini Live is not built.
+8. **Store.** The drive's events (IMU and location) and score are kept in an in-memory trip store for the app session; nothing is persisted across restarts yet.
 
 **Post-trip (cloud):**
 
-9. **Upload.** When the trip ends, the app posts its supported events and score to `POST /trips` when `EXPO_PUBLIC_API_URL` is configured. A failed upload remains retryable for the current app session.
+9. **Upload.** When the trip ends, the app posts every event, with its GPS position, speed, limit and road, plus the scores, to `POST /trips` when `EXPO_PUBLIC_API_URL` is configured. A failed upload remains retryable for the current app session.
 10. **Analyze.** The cloud service sends the trip summary to Gemini, which returns a plain-language report and coaching tips. The report goes back to the phone and is shown and read aloud.
 11. **Persist.** The service writes the trip to Databricks Delta tables.
 12. **Learn.** Databricks jobs compute trends and risky locations, power dashboards, and periodically retrain the anomaly model on pooled drives. The exported ONNX model is versioned and served by the cloud service.
@@ -156,19 +158,19 @@ Live detection, alerts and the stop-sign coach need no network. The network is u
 
 ## 5. Hardware & firmware
 
-- **SensorTile.box**, stock ST BLE sensor-streaming firmware. No flashing needed.
+- **STEVAL-MKBOXPRO (SensorTile.box PRO)** running ST's **DATALOG2** firmware (advertised as `HSD2v34`). The app enables the accelerometer and gyroscope and starts the BLE stream with PnPL JSON commands; streaming only starts with an SD card in the board. See `docs/bluetooth.md` and `docs/steval-mkboxpro-results.md`.
 - First task: verify the stream with ST's **STBLE Sensor** app, then reproduce it in our parser.
-- Mount: fixed to the car (dash/cupholder), aligned roughly to the vehicle axes. Gravity vector auto-calibrates orientation at the start of a trip.
-- Open question: achievable stable sample rate over BLE with stock firmware. Plan for about 25 to 100 Hz and design features around the lower bound.
+- Mount: fixed to the car (dash/cupholder), flat, with the board's X arrow facing forward. A short stationary calibration sets the vehicle axes; it is saved per board, and the drive screen has **Recalibrate**.
+- Sample rate: 120 Hz accelerometer and gyroscope over BLE.
 
 ---
 
 ## 6. ML design
 
 ### 6.1 Crash detection (edge)
-- Rule-based: acceleration magnitude above about 4 g for a few samples, optionally followed by near-zero motion.
+- Rule-based, two checks: an impact (acceleration magnitude ≥ 4.5 g with rotation ≥ 35°/s, for 80 ms or enough impulse), and drastic slowing (smoothed forward deceleration ≥ 1.2 g for 120 ms, more than tyres can brake).
 - Runs on every sample, with no model needed.
-- A short confirmation window cuts false positives (potholes, dropped sensor) before escalating to the "Are you OK?" flow. The 4 g figure is an assumption to tune on real data.
+- A short confirmation window cuts false positives (potholes, dropped sensor) before escalating to the "Are you OK?" flow. Thresholds are provisional; see [the IMU pipeline guide](docs/imu-pipeline.md).
 
 ### 6.2 Swerve / erratic driving (edge model)
 We have no labeled "drunk" data and cannot ethically collect it. So we **do not claim intoxication detection**. The current code emits experimental `swerve_candidate` events from configurable heuristics; the model described below is a later phase after real-data collection and evaluation.
@@ -178,6 +180,15 @@ We have no labeled "drunk" data and cannot ethically collect it. So we **do not 
 - **Deployment:** export to ONNX and run with `onnxruntime-react-native`. Fallback: re-implement feature extraction and a small model (trees or logistic regression) directly in TypeScript. Feature code is written once per language and checked against the Python version with shared test vectors, so the two cannot drift.
 - **Validation:** staged, deliberate weaving laps in a safe empty lot as the positive class. Report precision/recall on that, and say plainly what it measures.
 - **Output:** a continuous erratic-driving score plus a thresholded event with hysteresis (avoid flapping).
+
+### Live tuning (Tune panel)
+The drive screen's **Tune** panel changes detection while driving, with no rebuild (`TuningPanel.tsx`, `src/core/imu/tuning.ts`):
+- an on/off switch and a sensitivity (0.5×–2×, scaling that detector's thresholds) for crash, firm braking, quick acceleration, sharp turn and swerve;
+- an **All detectors** multiplier on top of those;
+- **Ignore tilting** (skip braking, turn and acceleration while the board tips faster than 45°/s) and the **sharp-turn arc** (heading a turn must sweep, default 45°);
+- a live readout of the last 2 s of motion.
+
+Settings apply to the running drive immediately and are saved on the phone.
 
 ### 6.3 Edge deployment story
 Both detectors run on the phone, with no server in the loop. The model is trained in Python, shipped inside the app, and updated over the air from the cloud service after Databricks retraining. Every downloaded model is checked against bundled test vectors before it is activated. Stretch: a Raspberry Pi gateway running the same model.
@@ -228,14 +239,12 @@ Both detectors run on the phone, with no server in the loop. The model is traine
 - **`speeding`** fires when the car stays more than 5 mph over that road's `maxspeed` for 3 consecutive fixes.
 - After a warning, it stays quiet for 60 s while the car keeps speeding, or 15 s if the driver slowed to the limit in between.
 - Roads without a `maxspeed` tag never warn.
-- The coach card shows the speed and limit. The voice says "You're over the speed limit. Slow down." using device TTS, since no ElevenLabs clip has been generated for it yet (`PhraseWithoutAudio` in `phrases.ts`).
+- The coach card shows the speed and limit, and an **mph speed badge** at the top right of the drive screen shows the current speed against the limit. The voice says "You're over the speed limit. Slow down." from a bundled ElevenLabs clip.
 - Around Centennial Campus, 99% of drivable road length has a `maxspeed` tag.
 
 Current limits:
 - **Foreground only.** Tracking pauses if the app is backgrounded or the screen locks.
 - **Tiles live in memory** for the app session (`MemoryTileStore`), plus the pre-downloaded file. Nothing new is persisted across restarts.
-- **No crowd hotspots** on live drives yet.
-- **Trip uploads don't include `speeding`.** `tripUpload.cloudEvents` only uploads the kinds the cloud consumers use.
 
 **Stop signs and traffic lights ahead** (`featureFilter.ts`): keep features within 200 m and ±35° of the heading. When OSM gives an absolute `direction` (degrees or cardinal), drop features that face a cross street; we read it as the way the sign faces, so a north-facing sign applies to southbound cars. `forward`/`backward` and untagged features are kept, and most OSM stop signs are untagged.
 
@@ -248,11 +257,10 @@ Current limits:
 - `highway → ramp` emits **`highway_exiting`**. The target is the ramp's `maxspeed`, or 35 mph if untagged. Advice is `slow_down` (severity `warn`) if the car is more than 10 mph over the target. Highway-to-highway interchange ramps also trigger this, which is reasonable because they are usually slower and curved.
 - Only `motorway` counts as a highway. `trunk_link` is also used for ordinary turn lanes at signalized intersections and would cause false alerts. Expressways mapped as `trunk` are not covered yet.
 
-**Stop compliance (planned, not built yet):** a state machine per sign:
-- `approaching` at about 150 m: "Stop sign ahead, start slowing down." (this announcement is built)
-- `braking check` at about 60 m: is speed trending down fast enough?
-- `at sign` within about 10 m: did speed reach below about 2 mph (stopped) or just slow?
-- Emit `stop_ok`, `rolling_stop` or `ran_stop` and say so.
+**Stop compliance** (`src/core/location/stopCompliance.ts`): once a stop sign is announced, the coach follows it:
+- it records the slowest GPS speed while the car is within 25 m of the sign;
+- once the car is 12 m past its closest approach, it judges: slowest ≤ about 1.3 mph → `stop_ok`, ≤ about 7 mph → `rolling_stop`, otherwise `ran_stop`, and says so;
+- a sign the car never reaches (it turned off) is dropped, and a sign is given up after 3 minutes.
 
 **Caveats we design for:**
 - **GPS jitter:** smooth with a short filter; highway class changes need 3 agreeing fixes.
@@ -271,7 +279,8 @@ Current limits:
 
 - **ElevenLabs** speaks every alert. Pre-generate and bundle audio for fixed phrases ("Stop sign ahead") so common alerts play instantly with no network. Use streaming TTS only for dynamic text.
 - **Priority queue:** crash > stop-sign > highway merge/exit > traffic light > swerve > coaching tips. Higher priority interrupts lower. Rate-limit repeats.
-- **Gemini Live** provides the live voice conversation and transcript. The phone connects directly using a short-lived token minted by the cloud service, so the key never ships in the app and there is no extra proxy hop. We give it trip context (recent events, score) as system context so answers are specific.
+- **Live coaching:** after a notable moment, Gemini (through the cloud's `POST /coach`) writes one short remark from the moment, recent events, speed, road and the driver's Databricks history; at most one every 45 s, and a possible crash is never coaching material.
+- **Chat:** tap-to-ask questions stream their replies from `POST /chat/stream`. Gemini Live (direct, token-based) is not built, and there is no `POST /live-token`.
 - **Gemini (post-trip)** runs in the cloud service. It turns a trip's events and scores into a readable report and coaching tips, and later into weekly trend summaries using Databricks aggregates.
 - Never let the LLM make safety decisions. Detection is deterministic code and ML. The LLM explains and chats.
 - If the network is down, alerts fall back to bundled phrases and the device's built-in text-to-speech.
@@ -314,9 +323,15 @@ Module boundaries: `ble/` → `pipeline/` (calibrate, window, features) → `det
 |---|---|
 | `POST /trips` | Upload a finished trip (events, scores, GPS trace, summary features, optional raw IMU windows). Idempotent by trip id. |
 | `GET /trips/{id}/report` | Gemini-generated report and coaching tips for a trip |
-| `POST /live-token` | Mint a short-lived Gemini Live token for the phone |
 | `GET /model/latest` | Current model version, checksum and download URL |
 | `GET /health` | Liveness |
+| `POST /coach` | One live coaching remark for a notable moment (Gemini) |
+| `POST /chat`, `POST /chat/stream` | Answer a driver question (streamed for speech) |
+| `POST /tts` | Speak text in the ElevenLabs voice, so the key stays on the server |
+| `GET /hotspots?lat=&lon=&radiusM=` | Crowd hotspots near the car for live drives |
+| `GET /drivers/{driverId}/stats` | The driver's history for the live score |
+| `GET /model/files/{name}` | Download a published model file |
+| `POST /admin/databricks/sync`, `POST /admin/hotspots/refresh`, `POST /admin/coaching/refresh` | Push trips to Databricks / re-read published data (admin token or localhost) |
 | `GET /drivers/{driverId}/summary?range=7d\|30d\|all` | Dashboard: trips, minutes, distance, average / first / latest smoothness, stop compliance, problem events per trip by kind, speeding alerts, top issue, last trip |
 | `GET /drivers/{driverId}/trends?range=` | One point per drive for the charts (smoothness, stop compliance, 3-drive average, problem events) |
 | `GET /drivers/{driverId}/trips?limit=&before=` | Past drives, newest first, paged by start time (`nextBefore`). `limit=1` is the home screen's "Last drive" |
@@ -354,11 +369,9 @@ car-assistant-wolfhacks/
 │   ├── index.tsx                # Home, drive start and replay entry
 │   ├── drive.tsx                # Active driving screen (currently mock data)
 │   ├── diagnostics.tsx          # BLE/GATT developer diagnostics
-│   ├── settings.tsx
-│   ├── share.tsx                # Driver: show a code to a parent, share locations, end access
+│   ├── sensor-setup.tsx         # Find and choose the SensorTile
 │   ├── parent/
 │   │   ├── index.tsx            # Parent dashboard: KPIs, trends, recent drives
-│   │   ├── link.tsx             # Parent enters the driver's 6-digit code
 │   │   ├── speeding.tsx         # Speeding report
 │   │   └── trips/[id].tsx       # One drive, with the Gemini report
 │   └── trips/
