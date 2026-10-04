@@ -179,7 +179,7 @@ export default function DriveRoute() {
         ) : null}
         {location.status === 'denied' && !replayMode ? (
           <Text variant="bodySmall" style={styles.sensorError}>
-            Location is off, so stop sign, traffic light and highway coaching is unavailable. Allow location for Car Assistant in Settings.
+            Location is off, so stop sign, traffic light and highway coaching is unavailable. Allow location for DriveWise in Settings.
           </Text>
         ) : null}
 

@@ -1,4 +1,4 @@
-# Car Assistant (WolfHacks)
+# DriveWise (WolfHacks)
 
 An AI driving coach built on the **STMicroelectronics SensorTile.box**. A dash-mounted sensor streams motion data over Bluetooth to a phone. The phone app runs the ML on-device, detects crashes and erratic driving, tracks the car against live map data, and a voice coach speaks up when you need it ("Stop sign ahead, start slowing down"). After each trip, a small Python cloud service analyzes the drive with Gemini and feeds Databricks for long-term analysis and model retraining.
 
@@ -418,7 +418,7 @@ car-assistant-wolfhacks/
 │   └── config/                  # Public runtime configuration
 │
 ├── assets/
-│   ├── images/
+│   ├── images/                  # DriveWise home-screen icon (icon.png)
 │   ├── icons/
 │   └── audio/                   # Bundled alert phrases
 ├── fixtures/
