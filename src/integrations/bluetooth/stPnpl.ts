@@ -96,7 +96,9 @@ function decode(chunks: readonly Uint8Array[]): string {
     joined.set(chunk, offset);
     offset += chunk.length;
   }
-  return utf8Decode(joined);
+  // The firmware sends C strings, so responses can end with a NUL terminator
+  // that JSON.parse rejects.
+  return utf8Decode(joined).replace(/[\u0000\s]+$/, '');
 }
 
 // Hermes does not reliably provide TextEncoder/TextDecoder, so convert via
