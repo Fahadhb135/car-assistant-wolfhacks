@@ -3,6 +3,7 @@ import { ExpoSpeechTts } from '../../integrations/audio/ExpoSpeechTts';
 import { configureAlertAudioSession, expoAudioBackend, expoSpeechBackend } from '../../integrations/audio/expoBackends';
 import { BUNDLED_PHRASES } from './bundledPhrases';
 import { buildSpeakerChain } from './speakerChain';
+import { ServerTtsSpeaker } from './speakers/ServerTtsSpeaker';
 import type { Alert, LiveControl } from './types';
 import { VoiceCoordinator } from './VoiceCoordinator';
 
@@ -15,10 +16,14 @@ export function createVoice(
   onAlertStart?: (alert: Alert) => void,
 ): VoiceCoordinator {
   void configureAlertAudioSession().catch(onError);
+  const player = new ExpoAudioPlayer(expoAudioBackend);
+  // Free text goes through the cloud's ElevenLabs /tts so every line uses the same voice; the
+  // phone's built-in voice is only the last resort when that is unreachable.
   const speaker = buildSpeakerChain(
     BUNDLED_PHRASES,
-    new ExpoAudioPlayer(expoAudioBackend),
+    player,
     new ExpoSpeechTts(expoSpeechBackend),
+    [new ServerTtsSpeaker(player, { baseUrl: process.env.EXPO_PUBLIC_API_URL })],
   );
   return new VoiceCoordinator({ speaker, live: NO_LIVE, onError, onAlertStart });
 }

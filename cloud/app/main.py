@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from pydantic import BaseModel, Field
 
 from .chat import ChatFn, ChatRequest, ChatResponse, answer, chat_from_env
 from .chat_stream import TextStream, chat_text_stream_from_env, stream_reply
@@ -194,6 +195,18 @@ def create_app(
                 yield json.dumps(packet) + "\n"
 
         return StreamingResponse(lines(), media_type="application/x-ndjson")
+
+    class TtsRequest(BaseModel):
+        text: str = Field(min_length=1, max_length=500)
+
+    @app.post("/tts")
+    async def post_tts(req: TtsRequest) -> Response:
+        """ElevenLabs speech for text the phone has no bundled clip for, so it keeps one voice.
+        503 when ElevenLabs is not configured or fails; the phone then uses its own voice."""
+        audio = await tts.synthesize(req.text) if tts else None
+        if not audio:
+            raise HTTPException(503, "speech unavailable")
+        return Response(content=audio, media_type="audio/mpeg")
 
     @app.get("/model/latest", response_model=ModelInfo)
     def get_latest_model(request: Request) -> ModelInfo:

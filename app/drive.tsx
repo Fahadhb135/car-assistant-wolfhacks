@@ -1,3 +1,4 @@
+import { useKeepAwake } from 'expo-keep-awake';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
@@ -52,6 +53,8 @@ export default function DriveRoute() {
     deviceName?: string;
   }>();
   const replayMode = mode === 'replay';
+  // GPS coaching and spoken alerts stop if the phone locks mid-drive, so keep the screen on.
+  useKeepAwake();
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [ending, setEnding] = useState(false);

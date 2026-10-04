@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { PHRASES } from '../../features/voice/phrases';
 import { buildSpeakerChain } from '../../features/voice/speakerChain';
 import { VoiceCoordinator } from '../../features/voice/VoiceCoordinator';
 import { ev, flush } from '../../features/voice/testing';
@@ -210,10 +209,8 @@ describe('speaker chain on the phone', () => {
     voice.handleEvent(ev({ kind: 'crash', severity: 'critical', confirmed: false }, 0));
     await flush();
     expect(f.handles[0]!.log).toEqual(['play', 'stop', 'release']); // erratic clip cut off
-    // An unconfirmed heuristic candidate deliberately avoids the old "Crash detected" clip and
-    // uses device TTS for the accurately qualified "Possible crash" safety check.
-    expect(f.created).toEqual([1]);
-    expect(speech.spoken).toEqual([PHRASES.crash_check]);
-    speech.cb!.onDone();
+    // The crash check plays its ElevenLabs clip ("Possible crash detected..."), not the phone voice.
+    expect(f.created).toEqual([1, 2]);
+    expect(speech.spoken).toEqual([]);
   });
 });

@@ -40,6 +40,8 @@ export type Alert = {
   createdAt: number;
   /** Alert is dropped, not spoken late, once older than this. */
   ttlMs: number;
+  /** What the alert is about (a stop sign's id, a hotspot cell). Cooldowns apply per target. */
+  target?: string;
 };
 
 /** Plays one utterance. Must settle (resolve or reject) promptly when `signal` aborts. */

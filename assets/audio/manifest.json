@@ -7,9 +7,14 @@
   "erratic_driving": "erratic_driving.mp3",
   "stop_ok": "stop_ok.mp3",
   "traffic_light_ahead": "traffic_light_ahead.mp3",
+  "speeding": "speeding.mp3",
   "highway_merge": "highway_merge.mp3",
   "highway_exit": "highway_exit.mp3",
   "hotspot_rolling": "hotspot_rolling.mp3",
   "hotspot_ran": "hotspot_ran.mp3",
-  "hotspot_erratic": "hotspot_erratic.mp3"
+  "hotspot_erratic": "hotspot_erratic.mp3",
+  "hard_braking": "hard_braking.mp3",
+  "rapid_acceleration": "rapid_acceleration.mp3",
+  "harsh_cornering": "harsh_cornering.mp3",
+  "reply_fallback": "reply_fallback.mp3"
 }

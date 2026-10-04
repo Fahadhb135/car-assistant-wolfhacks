@@ -14,11 +14,13 @@ export class AlertQueue {
   private lastAccepted = new Map<string, number>();
 
   enqueue(alert: Alert, now: number): EnqueueResult {
-    const last = this.lastAccepted.get(alert.kind);
+    // A different stop sign or hotspot is a new alert, not a repeat of the last one.
+    const key = alert.target === undefined ? alert.kind : `${alert.kind}:${alert.target}`;
+    const last = this.lastAccepted.get(key);
     if (last !== undefined && now - last < POLICIES[alert.kind].cooldownMs) {
       return 'rate_limited';
     }
-    this.lastAccepted.set(alert.kind, now);
+    this.lastAccepted.set(key, now);
     this.items.push(alert);
     // Highest priority first, then oldest first.
     this.items.sort((a, b) => b.priority - a.priority || a.createdAt - b.createdAt);
