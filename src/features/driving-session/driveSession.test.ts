@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DriveEvent } from '../../core/events/types';
+import { destination, METERS_PER_MILE } from '../../core/location/geo';
+import { RegionPrefetcher } from '../../core/location/regionPrefetch';
 import { PHRASES } from '../voice/phrases';
 import type { Speaker } from '../voice/types';
 import { VoiceCoordinator } from '../voice/VoiceCoordinator';
@@ -141,5 +143,41 @@ describe('coachMessage', () => {
     expect(coachMessage(all[8]!).detail).toContain('60 mph'); // 26.8 m/s
     expect(coachMessage(all[9]!).detail).toContain('40 mph'); // 17.9 m/s
     expect(CLEAR_ROAD.tone).toBe('calm');
+  });
+});
+
+describe('live map region', () => {
+  it('prefetches the area on the first fix and moves it near the edge', async () => {
+    const retained: string[][] = [];
+    const prefetched: string[][] = [];
+    const session = new DriveSession({
+      coach: { update: () => [] },
+      tiles: {
+        update: async () => {},
+        featuresAhead: () => [],
+        roadsNear: () => [],
+        retain: async (keys) => void retained.push([...keys]),
+        prefetch: async (keys) => void prefetched.push([...keys]),
+      },
+      region: new RegionPrefetcher(),
+      voice: { handleEvent: () => {} },
+    });
+    const start = { lat: 35.769326, lon: -78.676307 };
+    const fix = (p: { lat: number; lon: number }) => ({ ...p, t: 0, speed: 10, heading: 90 });
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    session.onFix(fix(start));
+    await settle();
+    expect(prefetched).toHaveLength(1);
+    expect(retained[0]).toEqual(expect.arrayContaining(prefetched[0]!));
+
+    session.onFix(fix(destination(start, 90, 1.4 * METERS_PER_MILE)));
+    await settle();
+    expect(prefetched).toHaveLength(1);
+
+    session.onFix(fix(destination(start, 90, 1.6 * METERS_PER_MILE)));
+    await settle();
+    expect(prefetched).toHaveLength(2);
+    expect(prefetched[1]).not.toEqual(prefetched[0]);
   });
 });

@@ -1,6 +1,6 @@
 import { normalizeBearing, type LatLon } from './geo';
 import type { BBox } from './tiles';
-import type { RoadFeature, RoadKind, RoadWay, TileContents } from './types';
+import type { DrivableRoadClass, RoadFeature, RoadKind, RoadWay, SpeedLimitWay, TileContents } from './types';
 
 // Pure Overpass helpers: build the query for a tile and parse the JSON reply.
 // The network call itself lives in src/integrations/location/overpassClient.ts.
@@ -23,13 +23,20 @@ export type OverpassResponse = { elements?: OverpassElement[] };
 
 const FEATURE_TAGS: Record<string, RoadFeature['kind']> = { stop: 'stop', traffic_signals: 'traffic_signals' };
 const ROAD_TAGS: Record<string, RoadKind> = { motorway: 'motorway', motorway_link: 'motorway_link' };
+const DRIVABLE: readonly DrivableRoadClass[] = [
+  'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential', 'living_street',
+  'motorway_link', 'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link',
+];
+const DRIVABLE_SET = new Set<string>(DRIVABLE);
 
 export function buildTileQuery(b: BBox, timeoutS = 25): string {
   const bbox = [b.south, b.west, b.north, b.east].map((n) => n.toFixed(6)).join(',');
   return (
     `[out:json][timeout:${timeoutS}];(` +
     `node["highway"~"^(stop|traffic_signals)$"](${bbox});` +
-    `way["highway"~"^(motorway|motorway_link)$"](${bbox});` +
+    // Every drivable road (with its maxspeed) for speeding checks; motorways and ramps among them
+    // also feed highway entry/exit coaching.
+    `way["highway"~"^(${DRIVABLE.join('|')})$"](${bbox});` +
     `);out geom;`
   );
 }
@@ -66,9 +73,23 @@ function parseOneway(tags: Record<string, string>): RoadWay['oneway'] {
   return 1;
 }
 
+/**
+ * Direction of travel for any road: one-way only when tagged (or a roundabout, or a motorway or
+ * ramp, which are one-way by default).
+ */
+function parseRoadOneway(tags: Record<string, string>): SpeedLimitWay['oneway'] {
+  const v = tags.oneway;
+  if (v === '-1' || v === 'reverse') return -1;
+  if (v === 'yes' || v === '1' || v === 'true') return 1;
+  if (v === 'no' || v === 'false' || v === '0') return 0;
+  if (tags.junction === 'roundabout' || tags.junction === 'circular') return 1;
+  return tags.highway === 'motorway' || tags.highway === 'motorway_link' ? 1 : 0;
+}
+
 export function parseTile(res: OverpassResponse): TileContents {
   const features: RoadFeature[] = [];
   const roads: RoadWay[] = [];
+  const speedLimits: SpeedLimitWay[] = [];
   for (const el of res.elements ?? []) {
     const tags = el.tags ?? {};
     if (el.type === 'node' && typeof el.lat === 'number' && typeof el.lon === 'number') {
@@ -84,6 +105,18 @@ export function parseTile(res: OverpassResponse): TileContents {
         ...(directionTag ? { directionTag } : {}),
       });
     } else if (el.type === 'way' && el.geometry && el.geometry.length >= 2) {
+      if (DRIVABLE_SET.has(tags.highway)) {
+        speedLimits.push({
+          id: el.id,
+          highway: tags.highway as DrivableRoadClass,
+          // 6 decimal places is ~10 cm, plenty for map matching, and keeps stored tiles small.
+          geometry: el.geometry.map(({ lat, lon }) => ({ lat: round6(lat), lon: round6(lon) })),
+          oneway: parseRoadOneway(tags),
+          maxspeedMps: parseMaxspeed(tags.maxspeed),
+          ...(tags.ref ? { ref: tags.ref } : {}),
+          ...(tags.name ? { name: tags.name } : {}),
+        });
+      }
       const kind = ROAD_TAGS[tags.highway];
       if (!kind) continue;
       roads.push({
@@ -97,5 +130,9 @@ export function parseTile(res: OverpassResponse): TileContents {
       });
     }
   }
-  return { features, roads };
+  return { features, roads, speedLimits };
+}
+
+function round6(n: number): number {
+  return Math.round(n * 1e6) / 1e6;
 }

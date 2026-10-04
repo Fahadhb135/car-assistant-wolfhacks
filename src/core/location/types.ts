@@ -46,5 +46,30 @@ export type RoadWay = {
   name?: string;
 };
 
-/** Everything we keep for one map tile. */
-export type TileContents = { features: RoadFeature[]; roads: RoadWay[] };
+/** OSM `highway` classes a car drives on, used for speed limits. */
+export type DrivableRoadClass =
+  | 'motorway' | 'trunk' | 'primary' | 'secondary' | 'tertiary' | 'unclassified' | 'residential' | 'living_street'
+  | 'motorway_link' | 'trunk_link' | 'primary_link' | 'secondary_link' | 'tertiary_link';
+
+/**
+ * Any drivable road, kept for speed-limit checks. Untagged roads are kept too (maxspeedMps null),
+ * so a car on one is not matched to a tagged road next to it.
+ */
+export type SpeedLimitWay = {
+  /** OSM way id. */
+  id: number;
+  highway: DrivableRoadClass;
+  geometry: LatLon[];
+  /** 1 = traffic flows in way order, -1 = against it, 0 = both directions. */
+  oneway: 1 | -1 | 0;
+  /** Posted limit from `maxspeed`, metres per second, or null if untagged. */
+  maxspeedMps: number | null;
+  ref?: string;
+  name?: string;
+};
+
+/**
+ * Everything we keep for one map tile. `speedLimits` is optional so older bundled tiles without it
+ * still load (they just give no speeding alerts).
+ */
+export type TileContents = { features: RoadFeature[]; roads: RoadWay[]; speedLimits?: SpeedLimitWay[] };

@@ -190,3 +190,43 @@ describe('OverpassClient', () => {
     });
   });
 });
+
+describe('TileCache regions', () => {
+  const keysAround = (n: number) => Array.from({ length: n }, (_, i) => tileKeyFor(destination(CENTER, 90, i * 1700)));
+
+  it('prefetches each tile once, at most `concurrency` fetches at a time', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const calls: BBox[] = [];
+    const client = {
+      async fetchTile(bbox: BBox): Promise<TileContents> {
+        calls.push(bbox);
+        active++;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active--;
+        return { features: [], roads: [] };
+      },
+    };
+    const cache = new TileCache({ client });
+    const keys = keysAround(6);
+    await cache.prefetch(keys, 2);
+    assert.equal(calls.length, 6);
+    assert.equal(maxActive, 2);
+    for (const key of keys) assert.ok(cache.peek(key), `${key} not loaded`);
+
+    await cache.prefetch(keys, 2);
+    assert.equal(calls.length, 6, 'fresh tiles are not fetched again');
+  });
+
+  it('retains only the requested tiles in memory and the store', async () => {
+    const store = new MemoryTileStore();
+    const cache = new TileCache({ client: fakeClient(), store });
+    const [keep, drop] = keysAround(2) as [string, string];
+    await cache.prefetch([keep, drop]);
+    await cache.retain([keep]);
+    assert.ok(cache.peek(keep));
+    assert.equal(cache.peek(drop), undefined);
+    assert.deepEqual(await store.keys(), [keep]);
+  });
+});

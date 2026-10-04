@@ -1,5 +1,6 @@
 export type AlertKind =
   | 'crash'
+  | 'speeding'
   | 'ran_stop'
   | 'hotspot_ahead'
   | 'stop_sign_ahead'

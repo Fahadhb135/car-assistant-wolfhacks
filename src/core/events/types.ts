@@ -20,6 +20,14 @@ export type DriveEventBody =
     }
   | { kind: 'stop_ok' | 'rolling_stop' | 'ran_stop'; severity: 'info' | 'warn' }
   | {
+      /** Car stayed over the posted limit of the road it is on (OSM maxspeed). Speeds in m/s. */
+      kind: 'speeding';
+      severity: 'warn';
+      speedMps: number;
+      limitMps: number;
+      road?: string;
+    }
+  | {
       /** A place where several other drivers had trouble (from the cloud's hotspot list). */
       kind: 'hotspot_ahead';
       severity: 'info';

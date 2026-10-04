@@ -1,7 +1,10 @@
 import { createIdGenerator, toDriveEvent, type DriveEvent, type DriveEventInput } from '../../core/events/types';
 import type { FeatureAhead } from '../../core/location/featureFilter';
 import type { LocationCoach } from '../../core/location/coach';
-import type { GpsFix, RoadWay } from '../../core/location/types';
+import type { SpeedingCoach } from '../../core/location/speeding';
+import type { Region, RegionPrefetcher } from '../../core/location/regionPrefetch';
+import { tilesForFix, type TileKey } from '../../core/location/tiles';
+import type { GpsFix, RoadWay, SpeedLimitWay } from '../../core/location/types';
 import type { VoiceCoordinator } from '../voice/VoiceCoordinator';
 
 export type DriveSessionDeps = {
@@ -10,7 +13,22 @@ export type DriveSessionDeps = {
     update(fix: GpsFix): Promise<void>;
     featuresAhead(fix: GpsFix): FeatureAhead[];
     roadsNear(fix: GpsFix): RoadWay[];
+    /** Drivable roads with speed limits around the car (used with `speeding`). */
+    speedLimitsNear?(fix: GpsFix): SpeedLimitWay[];
+    /** Background-load a set of tiles (used with `region`). */
+    prefetch?(keys: readonly TileKey[]): Promise<void>;
+    /** Drop every tile outside `keys` (used with `region`). */
+    retain?(keys: readonly TileKey[]): Promise<void>;
   };
+  /**
+   * Keeps a whole area of map tiles loaded around the car (live drives). When it re-centers, tiles
+   * outside the new area are dropped and the new area is prefetched in the background.
+   */
+  region?: Pick<RegionPrefetcher, 'update'> | null;
+  /** Called whenever the prefetched area moves, e.g. for logging. */
+  onRegion?: (region: Region) => void;
+  /** Speed-limit warnings (live drives). */
+  speeding?: Pick<SpeedingCoach, 'update'> | null;
   /** Crowd hotspots, if the cloud list was available. */
   hotspots?: { update(fix: GpsFix): DriveEventInput[] } | null;
   voice: Pick<VoiceCoordinator, 'handleEvent'>;
@@ -38,11 +56,13 @@ export class DriveSession {
    * would be dropped as stale) and fixes are always processed in order.
    */
   onFix(fix: GpsFix): DriveEvent[] {
-    const { tiles, coach, hotspots, voice, onEvent, onError } = this.deps;
+    const { tiles, coach, speeding, hotspots, voice, onEvent, onError } = this.deps;
     void tiles.update(fix).catch((err) => onError?.(err));
+    this.moveRegion(fix);
     const inputs: DriveEventInput[] = [
       ...(hotspots?.update(fix) ?? []),
       ...coach.update(fix, tiles.featuresAhead(fix), tiles.roadsNear(fix)),
+      ...(speeding && tiles.speedLimitsNear ? speeding.update(fix, tiles.speedLimitsNear(fix)) : []),
     ];
     const events = inputs.map((i) => toDriveEvent(i, this.nextId));
     for (const e of events) {
@@ -50,6 +70,20 @@ export class DriveSession {
       voice.handleEvent(e);
     }
     return events;
+  }
+
+  private moveRegion(fix: GpsFix): void {
+    const { tiles, region, onRegion, onError } = this.deps;
+    if (!region || !tiles.prefetch || !tiles.retain) return;
+    const next = region.update(fix);
+    if (!next) return;
+    onRegion?.(next);
+    // The tiles under the car always stay, even if they sit on the region's edge.
+    const keep = [...new Set([...next.keys, ...tilesForFix(fix)])];
+    void tiles
+      .retain(keep)
+      .then(() => tiles.prefetch!(next.keys))
+      .catch((err) => onError?.(err));
   }
 
   /** Load the map around the starting point before the drive begins (used by replay). */

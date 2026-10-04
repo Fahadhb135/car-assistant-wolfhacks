@@ -34,6 +34,8 @@ export function describeEvent(e: DriveEvent): string {
       return e.advice === 'slow_down'
         ? `The driver took the exit ramp fast (${mph(e.speedMps)} mph vs about ${mph(e.targetSpeedMps)}).`
         : 'The driver took the exit ramp at a good speed.';
+    case 'speeding':
+      return `The driver was speeding (${mph(e.speedMps)} mph in a ${mph(e.limitMps)} mph zone${e.road ? ` on ${e.road}` : ''}).`;
     case 'hotspot_ahead':
       return 'The driver was warned about a spot where other drivers often have trouble.';
   }

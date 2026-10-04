@@ -1,7 +1,7 @@
 import { featuresAhead, type FeatureAhead, type FeatureFilterOptions } from '../../core/location/featureFilter';
 import type { LatLon } from '../../core/location/geo';
 import { tileBounds, tilesForFix, type TileKey } from '../../core/location/tiles';
-import type { RoadWay, TileContents } from '../../core/location/types';
+import type { RoadWay, SpeedLimitWay, TileContents } from '../../core/location/types';
 import type { OverpassClient } from './overpassClient';
 
 // Map data per ~1-mile tile, layered: memory → persistent store → Overpass
@@ -13,7 +13,7 @@ import type { OverpassClient } from './overpassClient';
 // load is retried after a back-off instead of on every fix.
 
 /** Bump when TileContents changes shape so stored tiles from older builds are refetched. */
-export const TILE_SCHEMA = 2;
+export const TILE_SCHEMA = 3;
 
 export type TileData = TileContents & {
   key: TileKey;
@@ -26,6 +26,10 @@ export type TileData = TileContents & {
 export interface TileStore {
   get(key: TileKey): Promise<TileData | null>;
   set(data: TileData): Promise<void>;
+  /** Drop a tile. Optional: stores without it keep tiles after `retain`. */
+  delete?(key: TileKey): Promise<void>;
+  /** Keys of every stored tile. Needed alongside `delete` for `retain`. */
+  keys?(): Promise<TileKey[]>;
 }
 
 export class MemoryTileStore implements TileStore {
@@ -35,6 +39,12 @@ export class MemoryTileStore implements TileStore {
   }
   async set(data: TileData) {
     this.map.set(data.key, data);
+  }
+  async delete(key: TileKey) {
+    this.map.delete(key);
+  }
+  async keys() {
+    return [...this.map.keys()];
   }
 }
 
@@ -90,6 +100,41 @@ export class TileCache {
   roadsNear(fix: LatLon & { heading?: number | null }): RoadWay[] {
     // A way crossing a tile border comes back in both tiles' queries.
     return dedupeById(this.loaded(fix).flatMap((t) => t.roads));
+  }
+
+  /**
+   * Load these tiles in the background, at most `concurrency` network fetches at a time so a
+   * whole region doesn't flood the public Overpass mirrors. Tiles already fresh in memory or the
+   * store cost nothing. Failures go to onError and are retried on a later call.
+   */
+  async prefetch(keys: readonly TileKey[], concurrency = 2): Promise<void> {
+    const queue = [...keys];
+    const worker = async () => {
+      for (let key = queue.shift(); key !== undefined; key = queue.shift()) {
+        await this.getTile(key);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker));
+  }
+
+  /** Drop every tile not in `keys` from memory and from the store (if it supports deletion). */
+  async retain(keys: readonly TileKey[]): Promise<void> {
+    const keep = new Set(keys);
+    for (const key of [...this.memory.keys()]) {
+      if (!keep.has(key)) this.memory.delete(key);
+    }
+    for (const key of [...this.failedAt.keys()]) {
+      if (!keep.has(key)) this.failedAt.delete(key);
+    }
+    if (this.store.delete && this.store.keys) {
+      const stored = await this.store.keys().catch(() => []);
+      await Promise.all(stored.filter((key) => !keep.has(key)).map((key) => this.store.delete!(key).catch(() => undefined)));
+    }
+  }
+
+  /** Drivable roads with their speed limits in the loaded tiles around the car. Never blocks. */
+  speedLimitsNear(fix: LatLon & { heading?: number | null }): SpeedLimitWay[] {
+    return dedupeById(this.loaded(fix).flatMap((t) => t.speedLimits ?? []));
   }
 
   /** Synchronous peek at a loaded tile. */
