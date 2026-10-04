@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ParentResult } from '../../integrations/backend/parentClient';
 import {
-  formatAgo, formatDistanceM, formatEventClock, formatMiles, formatMinutes, formatOverBy, formatPercent,
+  driveVerdict, formatAgo, formatDistanceM, formatEventClock, formatMiles, formatMinutes, formatOverBy, formatPercent,
   formatScore, formatWhen, issueLabel, trendOf, trendSentence,
 } from './format';
 import { failureMessage, loadWithFallback, type ResourceCache } from './loadWithFallback';
@@ -65,7 +65,7 @@ describe('format', () => {
 
 describe('loadWithFallback', () => {
   const ok = <T>(data: T): ParentResult<T> => ({ ok: true, data });
-  const fail = (reason: 'offline' | 'unauthorized' | 'bad-response' | 'not-found'): ParentResult<never> => ({ ok: false, reason });
+  const fail = (reason: 'offline' | 'bad-response' | 'not-found'): ParentResult<never> => ({ ok: false, reason });
 
   it('returns fresh data and remembers it', async () => {
     const cache: ResourceCache = new Map();
@@ -85,13 +85,11 @@ describe('loadWithFallback', () => {
     expect(await loadWithFallback(new Map(), 'x', async () => fail('offline'))).toEqual({ status: 'error', failure: 'offline' });
   });
 
-  it('never hides a revoked token behind old data, and forgets everything', async () => {
+  it('also falls back to the last good copy when the service sends something unreadable', async () => {
     const cache: ResourceCache = new Map();
-    await loadWithFallback(cache, 'summary', async () => ok({ trips: 3 }));
-    await loadWithFallback(cache, 'speeding', async () => ok({ count: 1 }));
-    const r = await loadWithFallback(cache, 'summary', async () => fail('unauthorized'));
-    expect(r).toEqual({ status: 'error', failure: 'unauthorized' });
-    expect(cache.size).toBe(0);
+    await loadWithFallback(cache, 'summary', async () => ok({ trips: 3 }), () => 1_000);
+    const r = await loadWithFallback(cache, 'summary', async () => fail('bad-response'), () => 5_000);
+    expect(r).toMatchObject({ status: 'ready', stale: true, savedAt: 1_000 });
   });
 
   it('does not show one trip as the answer for a drive that is gone', async () => {
@@ -108,8 +106,26 @@ describe('loadWithFallback', () => {
   });
 
   it('has a message for every failure', () => {
-    for (const f of ['unauthorized', 'offline', 'not-found', 'rate-limited', 'invalid-code', 'bad-response'] as const) {
+    for (const f of ['offline', 'not-found', 'bad-response'] as const) {
       expect(failureMessage(f).length).toBeGreaterThan(10);
     }
+  });
+});
+
+describe('driveVerdict (the home screen’s one-line summary)', () => {
+  const clean = { nBadEvents: 0, speedingCount: 0, hadCrash: false };
+
+  it('calls a drive with nothing flagged smooth', () => {
+    expect(driveVerdict(clean)).toEqual({ text: 'Smooth and attentive', good: true });
+  });
+
+  it('counts things to work on and speeding alerts, singular and plural', () => {
+    expect(driveVerdict({ ...clean, nBadEvents: 1 })).toEqual({ text: '1 thing to work on', good: false });
+    expect(driveVerdict({ ...clean, nBadEvents: 3, speedingCount: 2 })).toEqual({ text: '3 things to work on · 2 speeding alerts', good: false });
+    expect(driveVerdict({ ...clean, speedingCount: 1 })).toEqual({ text: '1 speeding alert', good: false });
+  });
+
+  it('only says crash when it was confirmed', () => {
+    expect(driveVerdict({ ...clean, hadCrash: true })).toEqual({ text: 'Crash confirmed', good: false });
   });
 });

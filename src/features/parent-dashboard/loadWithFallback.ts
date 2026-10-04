@@ -8,10 +8,7 @@ export type Loaded<T> =
   | { status: 'ready'; data: T; savedAt: number; stale: true; failure: ParentFailure }
   | { status: 'error'; failure: ParentFailure };
 
-/**
- * Fetch, and fall back to the last good copy when the network is the problem. A revoked token
- * (`unauthorized`) is never papered over with old data: the parent must be told access is gone.
- */
+/** Fetch, and fall back to the last good copy when the network is the problem. */
 export async function loadWithFallback<T>(
   cache: ResourceCache,
   key: string,
@@ -28,17 +25,13 @@ export async function loadWithFallback<T>(
   if (old && (result.reason === 'offline' || result.reason === 'bad-response')) {
     return { status: 'ready', data: old.data as T, savedAt: old.savedAt, stale: true, failure: result.reason };
   }
-  if (result.reason === 'unauthorized') cache.clear();
   return { status: 'error', failure: result.reason };
 }
 
 export function failureMessage(failure: ParentFailure): string {
   switch (failure) {
-    case 'unauthorized': return 'This phone no longer has access. Ask the driver for a new code.';
     case 'offline': return 'Can’t reach the Car Assistant service. Check your connection and try again.';
     case 'not-found': return 'We couldn’t find that drive.';
-    case 'rate-limited': return 'Too many wrong codes. Wait a few minutes and try again.';
-    case 'invalid-code': return 'That code is wrong or has expired. Ask the driver for a new one.';
     case 'bad-response': return 'The service sent something unexpected. Try again in a moment.';
   }
 }

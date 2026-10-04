@@ -86,15 +86,9 @@ export function ResourceView<T>({ state, loading, onRetry, children }: Readonly<
   if (state.status === 'error') {
     return (
       <Surface style={styles.errorCard} elevation={0}>
-        <Text variant="titleMedium" style={styles.errorTitle}>
-          {state.failure === 'unauthorized' ? 'Access ended' : 'Couldn’t load this'}
-        </Text>
+        <Text variant="titleMedium" style={styles.errorTitle}>Couldn’t load this</Text>
         <Text variant="bodyMedium" style={styles.muted}>{failureMessage(state.failure)}</Text>
-        {state.failure === 'unauthorized' ? (
-          <Button mode="contained" onPress={() => router.replace('/parent/link')}>Enter a new code</Button>
-        ) : (
-          <Button mode="outlined" loading={loading} onPress={onRetry}>Try again</Button>
-        )}
+        <Button mode="outlined" loading={loading} onPress={onRetry}>Try again</Button>
       </Surface>
     );
   }

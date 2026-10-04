@@ -1,9 +1,9 @@
 import { router } from 'expo-router';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { Button, Card, Divider, Surface, Text } from 'react-native-paper';
+import { Button, Card, Surface, Text } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { getParentSession } from '@/features/parent-dashboard/parentSession';
+import { LastDriveCard } from '@/features/parent-dashboard/LastDriveCard';
 import { colors } from '@/theme';
 
 export default function HomeRoute() {
@@ -55,28 +55,7 @@ export default function HomeRoute() {
           Run replay demo
         </Button>
 
-        <View style={styles.sectionHeader}>
-          <Text variant="titleLarge" style={styles.sectionTitle}>Last drive</Text>
-          <Button compact mode="text" onPress={() => router.push('/trips/demo')}>View report</Button>
-        </View>
-
-        <Card style={styles.tripCard} mode="contained" onPress={() => router.push('/trips/demo')}>
-          <Card.Content style={styles.tripContent}>
-            <View style={styles.scoreBlock}>
-              <Text variant="displaySmall" style={styles.score}>88</Text>
-              <Text variant="labelMedium" style={styles.muted}>DRIVE SCORE</Text>
-            </View>
-            <Divider style={styles.verticalDivider} />
-            <View style={styles.tripDetails}>
-              <Text variant="titleMedium">Campus loop</Text>
-              <Text variant="bodyMedium" style={styles.muted}>Today · 24 min · 8.4 mi</Text>
-              <View style={styles.goodRow}>
-                <View style={styles.smallDot} />
-                <Text variant="labelMedium" style={styles.goodText}>Smooth and attentive</Text>
-              </View>
-            </View>
-          </Card.Content>
-        </Card>
+        <LastDriveCard />
 
         <Surface style={styles.privacyNote} elevation={0}>
           <Text variant="titleMedium">Designed for the road</Text>
@@ -85,24 +64,14 @@ export default function HomeRoute() {
           </Text>
         </Surface>
 
-        <View style={styles.parentRow}>
-          <Button
-            mode="outlined"
-            icon="account-heart-outline"
-            style={styles.parentButton}
-            onPress={() => router.push('/share')}
-          >
-            Share with a parent
-          </Button>
-          <Button
-            mode="outlined"
-            icon="chart-line"
-            style={styles.parentButton}
-            onPress={() => router.push(getParentSession() ? '/parent' : '/parent/link')}
-          >
-            Parent view
-          </Button>
-        </View>
+        <Button
+          mode="outlined"
+          icon="chart-line"
+          contentStyle={styles.secondaryButtonContent}
+          onPress={() => router.push('/parent')}
+        >
+          Dashboard
+        </Button>
 
         <Button
           compact
@@ -137,21 +106,7 @@ const styles = StyleSheet.create({
   primaryButtonContent: { height: 54, flexDirection: 'row-reverse' },
   primaryButtonLabel: { fontSize: 16, fontWeight: '800' },
   secondaryButtonContent: { height: 50 },
-  sectionHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
-  sectionTitle: { color: colors.ink, fontWeight: '800' },
-  tripCard: { backgroundColor: colors.paper, borderRadius: 22 },
-  tripContent: { alignItems: 'center', flexDirection: 'row', gap: 18, paddingVertical: 18 },
-  scoreBlock: { alignItems: 'center', minWidth: 68 },
-  score: { color: colors.forest, fontWeight: '800' },
-  muted: { color: colors.muted },
-  verticalDivider: { height: 64, width: 1 },
-  tripDetails: { flex: 1, gap: 5 },
-  goodRow: { alignItems: 'center', flexDirection: 'row', gap: 6, marginTop: 3 },
-  smallDot: { backgroundColor: colors.leaf, borderRadius: 4, height: 8, width: 8 },
-  goodText: { color: colors.leaf, fontWeight: '700' },
   privacyNote: { backgroundColor: colors.mint, borderRadius: 20, gap: 6, padding: 18 },
   privacyCopy: { color: colors.muted, lineHeight: 21 },
   diagnostics: { alignSelf: 'center', marginTop: 2 },
-  parentRow: { flexDirection: 'row', gap: 10 },
-  parentButton: { flex: 1 },
 });
