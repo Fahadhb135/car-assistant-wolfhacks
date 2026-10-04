@@ -15,6 +15,7 @@ class TripEvent(BaseModel):
     lat: Optional[float] = None
     lon: Optional[float] = None
     score: Optional[float] = None
+    evidence: Optional[dict[str, float]] = None
     # Heuristic crash candidates remain explicitly unconfirmed through storage and reporting.
     confirmed: Optional[bool] = None
 

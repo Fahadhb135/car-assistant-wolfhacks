@@ -89,6 +89,7 @@ export default function SensorSetupRoute() {
         <Text variant="headlineMedium" style={styles.title}>Choose your motion sensor</Text>
         <Text variant="bodyLarge" style={styles.copy}>
           Keep the STEVAL-MKBOXPRO nearby and disconnect it from ST BLE Sensor first.
+          Mount the board flat and secure with its X arrow facing the front of the car.
         </Text>
         <Text variant="labelLarge" style={styles.status}>{status}</Text>
         {error ? <Text style={styles.error}>{error}</Text> : null}

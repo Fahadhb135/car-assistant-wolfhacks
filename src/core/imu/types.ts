@@ -81,6 +81,30 @@ export type SwerveDetectorConfig = Readonly<{
   cooldownMs: number;
 }>;
 
+export type LongitudinalBehaviorConfig = Readonly<{
+  triggerLongitudinalG: number;
+  releaseLongitudinalG: number;
+  minimumDurationMs: number;
+  minimumJerkGps: number;
+  cooldownMs: number;
+}>;
+
+export type HarshCorneringConfig = Readonly<{
+  triggerLateralG: number;
+  releaseLateralG: number;
+  minimumYawRateDps: number;
+  releaseYawRateDps: number;
+  minimumDurationMs: number;
+  cooldownMs: number;
+}>;
+
+export type DrivingBehaviorConfig = Readonly<{
+  maximumContinuityGapMs: number;
+  hardBraking: LongitudinalBehaviorConfig;
+  rapidAcceleration: LongitudinalBehaviorConfig;
+  harshCornering: HarshCorneringConfig;
+}>;
+
 export type ImuPipelineConfig = Readonly<{
   validation: SampleValidationConfig;
   bufferRetentionMs: number;
@@ -88,6 +112,7 @@ export type ImuPipelineConfig = Readonly<{
   windows: SlidingWindowConfig;
   crash: CrashDetectorConfig;
   swerve: SwerveDetectorConfig;
+  behaviors: DrivingBehaviorConfig;
 }>;
 
 export type PartialImuPipelineConfig = Readonly<{
@@ -97,6 +122,12 @@ export type PartialImuPipelineConfig = Readonly<{
   windows?: Partial<SlidingWindowConfig>;
   crash?: Partial<CrashDetectorConfig>;
   swerve?: Partial<SwerveDetectorConfig>;
+  behaviors?: Readonly<{
+    maximumContinuityGapMs?: number;
+    hardBraking?: Partial<LongitudinalBehaviorConfig>;
+    rapidAcceleration?: Partial<LongitudinalBehaviorConfig>;
+    harshCornering?: Partial<HarshCorneringConfig>;
+  }>;
 }>;
 
 export type ImuPipelineResult =

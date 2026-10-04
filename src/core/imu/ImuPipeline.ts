@@ -2,6 +2,7 @@ import type { ImuEvent } from '../events/types';
 import type { ImuSample } from '../sensors/types';
 import { resolvePipelineConfig } from './config';
 import { CrashCandidateDetector } from './CrashCandidateDetector';
+import { DrivingBehaviorDetector } from './DrivingBehaviorDetector';
 import { extractWindowFeatures } from './features';
 import { SampleValidator } from './sampleValidation';
 import { SlidingWindowBuilder } from './SlidingWindowBuilder';
@@ -9,6 +10,7 @@ import { StreamHealth } from './StreamHealth';
 import { SwerveCandidateDetector } from './SwerveCandidateDetector';
 import { TimeRingBuffer } from './TimeRingBuffer';
 import type { ImuPipelineResult, PartialImuPipelineConfig, StreamHealthSnapshot } from './types';
+import { toVehicleFrame, type VehicleFrameCalibration } from './VehicleFrame';
 
 export class ImuPipeline {
   private readonly config;
@@ -18,6 +20,8 @@ export class ImuPipeline {
   private readonly windows;
   private readonly crashDetector;
   private readonly swerveDetector;
+  private readonly behaviorDetector;
+  private vehicleCalibration?: VehicleFrameCalibration;
 
   constructor(config: PartialImuPipelineConfig = {}) {
     this.config = resolvePipelineConfig(config);
@@ -26,6 +30,16 @@ export class ImuPipeline {
     this.windows = new SlidingWindowBuilder(this.config.windows);
     this.crashDetector = new CrashCandidateDetector(this.config.crash);
     this.swerveDetector = new SwerveCandidateDetector(this.config.swerve);
+    this.behaviorDetector = new DrivingBehaviorDetector(this.config.behaviors);
+  }
+
+  setVehicleCalibration(calibration: VehicleFrameCalibration | undefined): void {
+    this.vehicleCalibration = calibration;
+    this.behaviorDetector.reset();
+  }
+
+  hasVehicleCalibration(): boolean {
+    return this.vehicleCalibration !== undefined;
   }
 
   process(sample: ImuSample): ImuPipelineResult {
@@ -49,6 +63,9 @@ export class ImuPipeline {
     const events: ImuEvent[] = [];
     const crashEvent = this.crashDetector.process(sample);
     if (crashEvent) events.push(crashEvent);
+    if (this.vehicleCalibration) {
+      events.push(...this.behaviorDetector.process(toVehicleFrame(sample, this.vehicleCalibration)));
+    }
 
     const buildResult = this.windows.push(sample);
     const completedWindows = buildResult.windows.map((window) =>
@@ -82,5 +99,6 @@ export class ImuPipeline {
     this.windows.reset();
     this.crashDetector.reset();
     this.swerveDetector.reset();
+    this.behaviorDetector.reset();
   }
 }

@@ -2,19 +2,23 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
 import type { DriveEvent } from '../../core/events/types';
-import { ImuPipeline } from '../../core/imu';
+import { ImuPipeline, MountCalibrationCollector } from '../../core/imu';
 import { ReactNativeBleClient, StevalMkboxProSensorSource } from '../../integrations/bluetooth';
 import type { VoiceCoordinator } from '../voice/VoiceCoordinator';
+import { deleteSensorCalibration, loadSensorCalibration, saveSensorCalibration } from './calibrationStore';
 import { CLEAR_ROAD, coachMessage, type CoachMessage } from './coachMessage';
 import { ImuEventRouter } from './ImuEventRouter';
 
 export type LiveImuStatus = 'idle' | 'connecting' | 'starting' | 'running' | 'error' | 'stopped';
+export type CalibrationStatus = 'loading' | 'collecting' | 'ready' | 'error';
 
 type Runtime = {
   cancelled: boolean;
   disposed: boolean;
   client: ReactNativeBleClient;
   source: StevalMkboxProSensorSource | null;
+  pipeline: ImuPipeline | null;
+  calibrationCollector: MountCalibrationCollector | null;
   startup: Promise<void>;
 };
 
@@ -35,7 +39,7 @@ async function dispose(runtime: Runtime): Promise<void> {
   }
 }
 
-/** Owns the BLE connection and routes normalized live IMU events for one drive screen. */
+/** Owns BLE, stationary mount calibration, and normalized live IMU events for one drive screen. */
 export function useLiveImuDrive(
   enabled: boolean,
   deviceId: string | undefined,
@@ -43,14 +47,19 @@ export function useLiveImuDrive(
 ): Readonly<{
   status: LiveImuStatus;
   error: string | null;
+  calibrationStatus: CalibrationStatus;
+  calibrationMessage: string;
   coach: CoachMessage;
   eventsRef: React.MutableRefObject<DriveEvent[]>;
   /** Adds an event from another live source (e.g. location coaching) to the trip and coach card. */
   recordEvent: (event: DriveEvent) => void;
+  recalibrate: () => Promise<void>;
   stop: () => Promise<void>;
 }> {
   const [status, setStatus] = useState<LiveImuStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [calibrationStatus, setCalibrationStatus] = useState<CalibrationStatus>('loading');
+  const [calibrationMessage, setCalibrationMessage] = useState('Checking sensor calibration…');
   const [coach, setCoach] = useState<CoachMessage>(CLEAR_ROAD);
   const eventsRef = useRef<DriveEvent[]>([]);
   const runtimeRef = useRef<Runtime | null>(null);
@@ -63,12 +72,23 @@ export function useLiveImuDrive(
     calmTimerRef.current = setTimeout(() => setCoach(CLEAR_ROAD), CALM_AFTER_MS);
   }, []);
 
+  const recalibrate = useCallback(async () => {
+    const runtime = runtimeRef.current;
+    if (!runtime || !deviceId) return;
+    runtime.pipeline?.setVehicleCalibration(undefined);
+    runtime.calibrationCollector = null;
+    setCalibrationStatus('collecting');
+    setCalibrationMessage('Park safely. Keep the board still with its X arrow facing forward.');
+    await deleteSensorCalibration(deviceId).catch(() => undefined);
+    if (runtimeRef.current === runtime && !runtime.cancelled) {
+      runtime.calibrationCollector = new MountCalibrationCollector();
+    }
+  }, [deviceId]);
+
   const stop = useCallback(async () => {
     const runtime = runtimeRef.current;
     if (!runtime) return;
     runtime.cancelled = true;
-    // Destroying the client first also interrupts a connection/discovery that is still in flight;
-    // ending a drive must not wait through every BLE discovery retry.
     await dispose(runtime);
     await runtime.startup.catch(() => undefined);
     if (runtimeRef.current === runtime) runtimeRef.current = null;
@@ -80,6 +100,8 @@ export function useLiveImuDrive(
     eventsRef.current = [];
     setCoach(CLEAR_ROAD);
     setError(null);
+    setCalibrationStatus('loading');
+    setCalibrationMessage('Checking sensor calibration…');
 
     if (!deviceId) {
       setStatus('error');
@@ -98,6 +120,8 @@ export function useLiveImuDrive(
       disposed: false,
       client,
       source: null,
+      pipeline: null,
+      calibrationCollector: null,
       startup: Promise.resolve(),
     };
     runtimeRef.current = runtime;
@@ -109,14 +133,45 @@ export function useLiveImuDrive(
         if (runtime.cancelled) return;
 
         const source = new StevalMkboxProSensorSource(client);
-        runtime.source = source;
         const pipeline = new ImuPipeline();
+        runtime.source = source;
+        runtime.pipeline = pipeline;
+        const savedCalibration = await loadSensorCalibration(deviceId);
+        if (runtime.cancelled) return;
+        if (savedCalibration) {
+          pipeline.setVehicleCalibration(savedCalibration);
+          setCalibrationStatus('ready');
+          setCalibrationMessage('Vehicle-frame calibration loaded.');
+        } else {
+          runtime.calibrationCollector = new MountCalibrationCollector();
+          setCalibrationStatus('collecting');
+          setCalibrationMessage('Park safely. Keep the board still with its X arrow facing forward.');
+        }
+
         const eventRouter = new ImuEventRouter({ voice, onEvent: recordEvent });
 
         setStatus('starting');
         await source.start(
           (sample) => {
             const result = pipeline.process(sample);
+            if (result.accepted) {
+              const collector = runtime.calibrationCollector;
+              if (collector) {
+                const calibration = collector.add(sample);
+                if (calibration.status === 'ready') {
+                  runtime.calibrationCollector = null;
+                  pipeline.setVehicleCalibration(calibration.calibration);
+                  setCalibrationStatus('ready');
+                  setCalibrationMessage('Sensor calibrated for braking, acceleration, and cornering.');
+                  void saveSensorCalibration(deviceId, calibration.calibration).catch(() => {
+                    setCalibrationMessage('Calibrated for this drive; saving the calibration failed.');
+                  });
+                } else if (calibration.status === 'rejected') {
+                  setCalibrationStatus('error');
+                  setCalibrationMessage(calibration.reason);
+                }
+              }
+            }
             for (const candidate of result.events) eventRouter.route(candidate);
           },
           (sourceError) => {
@@ -143,5 +198,15 @@ export function useLiveImuDrive(
     };
   }, [deviceId, enabled, recordEvent, voice]);
 
-  return { status, error, coach, eventsRef, recordEvent, stop };
+  return {
+    status,
+    error,
+    calibrationStatus,
+    calibrationMessage,
+    coach,
+    eventsRef,
+    recordEvent,
+    recalibrate,
+    stop,
+  };
 }

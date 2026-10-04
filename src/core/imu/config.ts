@@ -33,6 +33,31 @@ export const DEFAULT_IMU_PIPELINE_CONFIG: ImuPipelineConfig = Object.freeze({
     releaseDirectionChanges: 1,
     cooldownMs: 3_000,
   }),
+  behaviors: Object.freeze({
+    maximumContinuityGapMs: 100,
+    hardBraking: Object.freeze({
+      triggerLongitudinalG: 0.3,
+      releaseLongitudinalG: 0.15,
+      minimumDurationMs: 250,
+      minimumJerkGps: 0.5,
+      cooldownMs: 5_000,
+    }),
+    rapidAcceleration: Object.freeze({
+      triggerLongitudinalG: 0.25,
+      releaseLongitudinalG: 0.12,
+      minimumDurationMs: 350,
+      minimumJerkGps: 0.4,
+      cooldownMs: 5_000,
+    }),
+    harshCornering: Object.freeze({
+      triggerLateralG: 0.35,
+      releaseLateralG: 0.18,
+      minimumYawRateDps: 18,
+      releaseYawRateDps: 8,
+      minimumDurationMs: 300,
+      cooldownMs: 5_000,
+    }),
+  }),
 });
 
 function positive(value: number, name: string): void {
@@ -47,6 +72,13 @@ export function resolvePipelineConfig(partial: PartialImuPipelineConfig = {}): I
     windows: { ...DEFAULT_IMU_PIPELINE_CONFIG.windows, ...partial.windows },
     crash: { ...DEFAULT_IMU_PIPELINE_CONFIG.crash, ...partial.crash },
     swerve: { ...DEFAULT_IMU_PIPELINE_CONFIG.swerve, ...partial.swerve },
+    behaviors: {
+      maximumContinuityGapMs: partial.behaviors?.maximumContinuityGapMs
+        ?? DEFAULT_IMU_PIPELINE_CONFIG.behaviors.maximumContinuityGapMs,
+      hardBraking: { ...DEFAULT_IMU_PIPELINE_CONFIG.behaviors.hardBraking, ...partial.behaviors?.hardBraking },
+      rapidAcceleration: { ...DEFAULT_IMU_PIPELINE_CONFIG.behaviors.rapidAcceleration, ...partial.behaviors?.rapidAcceleration },
+      harshCornering: { ...DEFAULT_IMU_PIPELINE_CONFIG.behaviors.harshCornering, ...partial.behaviors?.harshCornering },
+    },
   };
 
   positive(config.validation.maximumAbsoluteAccelerationG, 'maximumAbsoluteAccelerationG');
@@ -74,5 +106,30 @@ export function resolvePipelineConfig(partial: PartialImuPipelineConfig = {}): I
   if (config.swerve.releaseDirectionChanges < 0 || config.swerve.releaseDirectionChanges >= config.swerve.minimumDirectionChanges) throw new Error('releaseDirectionChanges must be below minimumDirectionChanges');
   if (config.swerve.maximumMissingSampleRatio < 0 || config.swerve.maximumMissingSampleRatio > 1) throw new Error('maximumMissingSampleRatio must be between 0 and 1');
   if (config.swerve.cooldownMs < 0) throw new Error('swerve cooldownMs must be non-negative');
+  positive(config.behaviors.maximumContinuityGapMs, 'behavior maximumContinuityGapMs');
+  for (const [name, behavior] of [
+    ['hardBraking', config.behaviors.hardBraking],
+    ['rapidAcceleration', config.behaviors.rapidAcceleration],
+  ] as const) {
+    positive(behavior.triggerLongitudinalG, `${name} triggerLongitudinalG`);
+    if (behavior.releaseLongitudinalG < 0 || behavior.releaseLongitudinalG >= behavior.triggerLongitudinalG) {
+      throw new Error(`${name} releaseLongitudinalG must be non-negative and below its trigger`);
+    }
+    positive(behavior.minimumDurationMs, `${name} minimumDurationMs`);
+    if (behavior.minimumJerkGps < 0) throw new Error(`${name} minimumJerkGps must be non-negative`);
+    if (behavior.cooldownMs < 0) throw new Error(`${name} cooldownMs must be non-negative`);
+  }
+  positive(config.behaviors.harshCornering.triggerLateralG, 'harshCornering triggerLateralG');
+  if (config.behaviors.harshCornering.releaseLateralG < 0
+    || config.behaviors.harshCornering.releaseLateralG >= config.behaviors.harshCornering.triggerLateralG) {
+    throw new Error('harshCornering releaseLateralG must be non-negative and below its trigger');
+  }
+  positive(config.behaviors.harshCornering.minimumYawRateDps, 'harshCornering minimumYawRateDps');
+  if (config.behaviors.harshCornering.releaseYawRateDps < 0
+    || config.behaviors.harshCornering.releaseYawRateDps >= config.behaviors.harshCornering.minimumYawRateDps) {
+    throw new Error('harshCornering releaseYawRateDps must be non-negative and below its trigger');
+  }
+  positive(config.behaviors.harshCornering.minimumDurationMs, 'harshCornering minimumDurationMs');
+  if (config.behaviors.harshCornering.cooldownMs < 0) throw new Error('harshCornering cooldownMs must be non-negative');
   return config;
 }

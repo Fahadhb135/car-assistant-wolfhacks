@@ -6,7 +6,7 @@ An AI driving coach built on the **STMicroelectronics SensorTile.box**. A dash-m
 
 Track: **Applied AI Hardware+**. Collect, analyze and act on real sensor data; detect patterns/anomalies; deploy ML to edge/IoT devices.
 
-> Status: the Expo app can select a STEVAL-MKBOXPRO, decode its DATALOG2 v3.4 accelerometer/gyroscope stream, run the pure-TypeScript IMU pipeline, and route experimental crash/swerve candidates into the live drive event, voice, UI, and trip paths. Thresholds and provisional scale factors still require physical validation (see [the IMU pipeline guide](docs/imu-pipeline.md)). Ending a drive keeps a retryable in-app trip and posts it to the FastAPI service, which starts Gemini report generation and Databricks synchronization. Live drives also run GPS location coaching (stop signs, traffic lights, highway entry/exit from OpenStreetMap; foreground only). The location modules, voice alert queue, bundled ElevenLabs audio, streamed push-to-talk Gemini chat, crowd hotspots, cloud service, and Databricks pipeline are implemented; replay mode runs the coaching and voice path offline on a bundled route.
+> Status: the Expo app can select a STEVAL-MKBOXPRO, decode its DATALOG2 v3.4 accelerometer/gyroscope stream, calibrate its mounted vehicle frame, run the pure-TypeScript IMU pipeline, and route experimental crash, swerve, hard-braking, rapid-acceleration, and harsh-corner candidates into the live drive event, voice, UI, and trip paths. Thresholds and provisional scale factors still require physical validation (see [the IMU pipeline guide](docs/imu-pipeline.md)). Ending a drive keeps a retryable in-app trip and posts it to the FastAPI service, which starts Gemini report generation and Databricks synchronization. Live drives also run foreground GPS location coaching for speeding, stop signs, traffic lights, and highway entry/exit using OpenStreetMap. The location modules, voice alert queue, bundled ElevenLabs audio, streamed push-to-talk Gemini chat, crowd hotspots, cloud service, and Databricks pipeline are implemented; replay mode runs the coaching and voice path offline on a bundled route.
 
 ---
 
@@ -94,7 +94,7 @@ Notes:
 1. **Sensor to phone.** The SensorTile.box streams IMU packets over BLE. The app parses ST's characteristic format into `{t, ax, ay, az, gx, gy, gz}`.
 2. **Calibrate.** At the start of a trip, estimate the gravity vector and rotate samples into vehicle axes (forward / lateral / vertical).
 3. **Crash check.** Every sample goes through the threshold crash detector (see 6.1). The IMU pipeline (`src/core/imu/`) currently emits an experimental `crash_candidate`; `src/core/events/fromImu.ts` maps it to a `crash` event so the voice layer can alert. Real-data tuning is follow-up work.
-4. **Window and infer.** The current implementation uses timestamp windows and a deterministic swerve heuristic to emit `swerve_candidate`, which the same adapter maps to `erratic_driving`. The planned on-device erratic-driving model can later consume the same features after real drives are collected and evaluated.
+4. **Detect maneuvers.** The current implementation uses timestamp windows for `swerve_candidate` and calibrated vehicle-frame samples for deterministic `hard_braking_candidate`, `rapid_acceleration_candidate`, and `harsh_corner_candidate` events. The same adapter maps them to app-wide coaching events. A later on-device model can consume the same features after real drives are collected and evaluated.
 5. **Location coach.** GPS plus heading are matched against cached map data (see Section 7). Emits `stop_sign_ahead`, `traffic_light_ahead`, `highway_entering`, `highway_exiting` and `speeding` events (implemented), and stop-compliance events `stop_ok` / `rolling_stop` / `ran_stop` (planned).
 6. **Speak.** Events go to a priority queue, then ElevenLabs (cached audio for fixed phrases), plus a local notification and on-screen banner.
 7. **Talk back.** The driver can speak to the assistant through Gemini Live ("how was that turn?"). The phone fetches a short-lived token from the cloud service and connects directly. Trip context is passed in so answers are specific. Transcripts are stored with the trip.
@@ -292,13 +292,15 @@ type GpsFix = { t: number; lat: number; lon: number; speed: number; heading: num
 type DriveEvent =
   | { kind: 'crash'; severity: 'critical'; confirmed: boolean }
   | { kind: 'erratic_driving'; severity: 'warn'; score: number }
+  | { kind: 'hard_braking' | 'rapid_acceleration' | 'harsh_cornering'; severity: 'warn';
+      score: number; evidence: Record<string, number> }
   | { kind: 'stop_sign_ahead' | 'traffic_light_ahead'; severity: 'info'; t: number; distanceM: number; featureId: number }
   | { kind: 'highway_entering' | 'highway_exiting'; severity: 'info' | 'warn'; t: number;
       speedMps: number; targetSpeedMps: number; targetIsDefault: boolean;
       advice: 'speed_up' | 'slow_down' | 'ok'; road?: string }
   | { kind: 'stop_ok' | 'rolling_stop' | 'ran_stop'; severity: 'info' | 'warn' };
 
-// The IMU pipeline (src/core/imu) emits its own `ImuEvent` candidates (crash_candidate, swerve_candidate)
+// The IMU pipeline emits crash/swerve plus calibrated braking, acceleration, and cornering candidates
 // with confidence and evidence; src/core/events/fromImu.ts maps them into this union.
 ```
 

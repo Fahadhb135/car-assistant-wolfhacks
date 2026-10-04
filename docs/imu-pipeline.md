@@ -5,7 +5,11 @@ The on-device processing pipeline turns normalized `ImuSample` measurements into
 ```text
 SensorSource -> ImuSample -> validation and health
                          |-> per-sample crash heuristic -> crash_candidate
-                         `-> timestamp windows -> features -> swerve heuristic -> swerve_candidate
+                         |-> timestamp windows -> features -> swerve_candidate
+                         `-> calibrated vehicle frame
+                               |-> hard_braking_candidate
+                               |-> rapid_acceleration_candidate
+                               `-> harsh_corner_candidate
 ```
 
 Candidate events do not confirm a crash, impairment, intoxication, or unsafe driving. The defaults are synthetic/demo starting values, not validated safety thresholds or safety certification.
@@ -23,6 +27,7 @@ The validator rejects non-finite or numerically unsafe timestamps, configured se
 - A time-retained ring buffer with a hard sample-count cap.
 - A crash detector evaluated for every sample.
 - Timestamp-based overlapping windows for feature and swerve evaluation.
+- When a valid mount calibration is available, a sensor-to-vehicle transform and constant-memory braking, acceleration, and cornering detectors.
 
 Window creation has a maximum catch-up count per input. After an extreme timestamp jump, stale windows beyond that bound are counted as skipped and the scheduler fast-forwards. This prevents malformed timestamps from causing unbounded work. Window storage also has a hard sample-count cap.
 
@@ -30,9 +35,13 @@ The crash detector tracks acceleration magnitude, time above the trigger, excess
 
 Window features currently include acceleration and angular-velocity magnitude statistics, jerk, sample count, observed duration, sequence-based missing ratio, and direction changes/variation on a configured raw sensor rotation axis. The swerve heuristic uses those features with hysteresis and cooldown.
 
-## Mounting and axes
+## Mount calibration and vehicle axes
 
-Inputs remain in the raw `sensor` frame. The configured swerve rotation axis is named `x`, `y`, or `z`; the pipeline does not call it forward, lateral, vertical, or yaw. Those vehicle-relative names require a separate mounting calibration and sensor-to-vehicle transform. Until that exists, mount the SensorTile consistently and treat swerve output as experimental.
+Hardware decoding still produces raw `sensor`-frame values. For a new SensorTile, the live drive collects a short stationary sample, estimates the gravity/vertical direction, and projects the board's X-axis onto the horizontal plane as vehicle-forward. The board must be mounted flat and secure with its X arrow facing the front of the vehicle. The resulting orthonormal forward/lateral/vertical transform is persisted per BLE device ID and can be replaced with **Recalibrate** on the drive screen.
+
+Calibration is rejected when the sample contains excessive acceleration variation, rotation, too few samples, or a degenerate orientation. Crash and raw-axis swerve processing continue, but hard-braking, rapid-acceleration, and harsh-corner candidates remain disabled until calibration succeeds.
+
+The behavior detectors use configurable trigger/release hysteresis, minimum duration, continuity gaps, and cooldowns. Longitudinal candidates also require a jerk transition. Cornering requires both lateral acceleration and yaw-rate evidence, which prevents an isolated vertical road bump from being called a corner. Evidence includes duration, peak acceleration, jerk, and rotation for tuning. Defaults are provisional and must be validated with controlled recordings.
 
 ## Usage
 
@@ -40,6 +49,7 @@ Inputs remain in the raw `sensor` frame. The configured swerve rotation axis is 
 import { ImuPipeline } from '@/core/imu';
 
 const pipeline = new ImuPipeline();
+pipeline.setVehicleCalibration(savedCalibration); // enables vehicle-relative behaviors
 const result = pipeline.process(sample);
 
 if (result.accepted) {
@@ -49,7 +59,7 @@ if (result.accepted) {
 }
 ```
 
-Thresholds and resource limits are constructor-configurable through `PartialImuPipelineConfig`. Call `reset()` between trips to clear validation history, buffers, window scheduling, detector latches, cooldowns, and health metrics.
+Thresholds and resource limits are constructor-configurable through `PartialImuPipelineConfig`. `setVehicleCalibration(undefined)` disables vehicle-relative behaviors without disabling crash/swerve processing. Call `reset()` between trips to clear validation history, buffers, window scheduling, detector latches, cooldowns, and health metrics.
 
 `ReplaySensorSource` and `StevalMkboxProSensorSource` implement the same `SensorSource` boundary. Deterministic stationary, normal-motion, pothole-like, impact, and repeated-rotation fixtures support development without Bluetooth.
 
@@ -81,4 +91,4 @@ npm test
 npm run typecheck
 ```
 
-The test suite covers invalid input, health math, bounded buffers and catch-up, gap-safe impact integration, overlapping windows, replay fixtures, reset behavior, and candidate-event suppression.
+The test suite covers invalid input, health math, bounded buffers and catch-up, gap-safe impact integration, calibration success/rejection and alternate orientations, braking/acceleration/corner detection, road-bump rejection, overlapping windows, replay fixtures, reset behavior, and candidate-event suppression.

@@ -41,8 +41,16 @@ export default function TripSummaryRoute() {
   const events = stored
     ? stored.trip.events.map((event) => ({
         time: formatEventTime(event.t - stored.trip.start),
-        title: event.kind === 'crash' ? 'Possible crash' : 'Unsteady driving',
-        detail: event.kind === 'crash' ? 'Safety check requested' : 'Motion candidate detected',
+        title: event.kind === 'crash'
+          ? 'Possible crash'
+          : event.kind === 'hard_braking'
+            ? 'Firm braking'
+            : event.kind === 'rapid_acceleration'
+              ? 'Quick acceleration'
+              : event.kind === 'harsh_cornering'
+                ? 'Sharp corner'
+                : 'Unsteady driving',
+        detail: event.kind === 'crash' ? 'Safety check requested' : 'Experimental motion candidate',
         tone: 'warn',
       }))
     : demoEvents;

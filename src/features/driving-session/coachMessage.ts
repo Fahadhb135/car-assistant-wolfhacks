@@ -48,5 +48,11 @@ export function coachMessage(e: DriveEvent): CoachMessage {
       };
     case 'erratic_driving':
       return { title: 'Unsteady driving', detail: 'Ease off and stay in your lane.', tone: 'warn' };
+    case 'hard_braking':
+      return { title: 'Firm braking', detail: 'Leave more space and brake earlier.', tone: 'warn' };
+    case 'rapid_acceleration':
+      return { title: 'Quick acceleration', detail: 'Ease onto the accelerator.', tone: 'warn' };
+    case 'harsh_cornering':
+      return { title: 'Sharp corner', detail: 'Slow before the turn and steer smoothly.', tone: 'warn' };
   }
 }

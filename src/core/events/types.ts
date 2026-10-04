@@ -6,6 +6,12 @@ export type HotspotKind = 'rolling_stop' | 'ran_stop' | 'erratic_driving';
 export type DriveEventBody =
   | { kind: 'crash'; severity: 'critical'; confirmed: boolean }
   | { kind: 'erratic_driving'; severity: 'warn'; score: number }
+  | {
+      kind: 'hard_braking' | 'rapid_acceleration' | 'harsh_cornering';
+      severity: 'warn';
+      score: number;
+      evidence: Readonly<Record<string, number>>;
+    }
   | { kind: 'stop_sign_ahead'; severity: 'info'; distanceM: number; featureId?: number }
   | { kind: 'traffic_light_ahead'; severity: 'info'; distanceM: number; featureId?: number }
   | {
@@ -67,7 +73,12 @@ export function toDriveEvent(input: DriveEventInput, nextId: () => string): Driv
  * for the rest of the app (voice, trip record).
  */
 export type ImuEvent = Readonly<{
-  kind: 'crash_candidate' | 'swerve_candidate';
+  kind:
+    | 'crash_candidate'
+    | 'swerve_candidate'
+    | 'hard_braking_candidate'
+    | 'rapid_acceleration_candidate'
+    | 'harsh_corner_candidate';
   occurredAtMs: number;
   severity: 'warning' | 'critical';
   confidence: number;

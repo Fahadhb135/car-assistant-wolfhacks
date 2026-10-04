@@ -3,9 +3,19 @@ import type { DriveEvent } from '../../core/events/types';
 export type CloudTripEvent = Readonly<{
   eventId: string;
   t: number;
-  kind: 'crash' | 'erratic_driving' | 'stop_sign_ahead' | 'stop_ok' | 'rolling_stop' | 'ran_stop';
+  kind:
+    | 'crash'
+    | 'erratic_driving'
+    | 'hard_braking'
+    | 'rapid_acceleration'
+    | 'harsh_cornering'
+    | 'stop_sign_ahead'
+    | 'stop_ok'
+    | 'rolling_stop'
+    | 'ran_stop';
   score?: number;
   confirmed?: boolean;
+  evidence?: Readonly<Record<string, number>>;
 }>;
 
 export type CloudTrip = Readonly<{
@@ -22,6 +32,9 @@ export type CloudTrip = Readonly<{
 const CLOUD_EVENT_KINDS = new Set<CloudTripEvent['kind']>([
   'crash',
   'erratic_driving',
+  'hard_braking',
+  'rapid_acceleration',
+  'harsh_cornering',
   'stop_sign_ahead',
   'stop_ok',
   'rolling_stop',
@@ -36,7 +49,17 @@ export function cloudEvents(events: readonly DriveEvent[]): CloudTripEvent[] {
         eventId: event.eventId,
         t: event.t,
         kind: event.kind as CloudTripEvent['kind'],
-        ...(event.kind === 'erratic_driving' ? { score: event.score } : {}),
+        ...(event.kind === 'erratic_driving'
+          || event.kind === 'hard_braking'
+          || event.kind === 'rapid_acceleration'
+          || event.kind === 'harsh_cornering'
+          ? { score: event.score }
+          : {}),
+        ...(event.kind === 'hard_braking'
+          || event.kind === 'rapid_acceleration'
+          || event.kind === 'harsh_cornering'
+          ? { evidence: event.evidence }
+          : {}),
         ...(event.kind === 'crash' ? { confirmed: event.confirmed } : {}),
       },
     ];
@@ -53,9 +76,11 @@ export function buildCloudTrip(options: Readonly<{
   const events = cloudEvents(options.events);
   const crashes = events.filter((event) => event.kind === 'crash').length;
   const erratic = events.filter((event) => event.kind === 'erratic_driving').length;
+  const maneuvers = events.filter((event) =>
+    ['hard_braking', 'rapid_acceleration', 'harsh_cornering'].includes(event.kind)).length;
   return {
     ...options,
-    scores: { smoothness: Math.max(0, 100 - crashes * 40 - erratic * 8) },
+    scores: { smoothness: Math.max(0, 100 - crashes * 40 - erratic * 8 - maneuvers * 5) },
     events,
     features: [],
     transcript: [],

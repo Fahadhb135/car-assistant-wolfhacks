@@ -34,10 +34,11 @@ The computer running Metro and the iPhone should be on the same network. Do not 
 ## Run the end-to-end live drive
 
 1. From the home screen, tap **Start drive**.
-2. Select the nearby `HSD2v34` SensorTile. The picker stops scanning before handing its device ID to the drive screen.
+2. Secure the board flat with its X arrow facing the front of the vehicle, then select the nearby `HSD2v34` SensorTile. The picker stops scanning before handing its device ID to the drive screen.
 3. The drive screen reconnects, discovers GATT, starts the acknowledged DATALOG2 command sequence, and owns the BLE connection until the drive ends.
-4. Candidate IMU events are converted to app-wide `DriveEvent`s, shown on the coach card, passed to the voice priority queue, and retained in the trip.
-5. Tap **End drive** to send `stop_log`, disconnect, save the trip in the current app session, and attempt `POST /trips`. Failed uploads can be retried from the summary screen.
+4. For a new or explicitly recalibrated sensor, remain safely parked and still during the short calibration. The app saves the vehicle-frame calibration per device; use **Recalibrate** after changing the mount.
+5. Candidate IMU events are converted to app-wide `DriveEvent`s, shown on the coach card, passed to the voice priority queue, and retained in the trip.
+6. Tap **End drive** to send `stop_log`, disconnect, save the trip in the current app session, and attempt `POST /trips`. Failed uploads can be retried from the summary screen.
 
 Set `EXPO_PUBLIC_API_URL` to the FastAPI service URL to enable trip upload and streamed coach chat. Live candidate events and voice alerts remain on-device when the cloud is unavailable.
 

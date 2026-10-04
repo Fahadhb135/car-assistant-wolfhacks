@@ -1,8 +1,12 @@
 """Turns one uploaded trip JSON into rows for the Delta tables. Plain Python so it is
 unit-tested locally; the ingest notebook only wraps it in Spark."""
+import json
 from typing import Optional
 
-BAD_KINDS = {"crash", "ran_stop", "rolling_stop", "erratic_driving"}
+BAD_KINDS = {
+    "crash", "ran_stop", "rolling_stop", "erratic_driving",
+    "hard_braking", "rapid_acceleration", "harsh_cornering",
+}
 
 
 def grid_cell(lat: Optional[float], lon: Optional[float], precision: int = 3) -> Optional[str]:
@@ -42,6 +46,7 @@ def flatten_trip(trip: dict) -> tuple[dict, list[dict], list[dict]]:
             "lon": e.get("lon"),
             "score": e.get("score"),
             "confirmed": e.get("confirmed"),
+            "evidenceJson": json.dumps(e.get("evidence"), sort_keys=True) if e.get("evidence") else None,
             "gridCell": grid_cell(e.get("lat"), e.get("lon")),
         }
         for e in events
