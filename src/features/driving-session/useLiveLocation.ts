@@ -22,8 +22,20 @@ export function useLiveLocation(
   enabled: boolean,
   voice: Pick<VoiceCoordinator, 'handleEvent'>,
   onEvent: (event: DriveEvent) => void,
-): Readonly<{ status: LiveLocationStatus; mapError: string | null }> {
+): Readonly<{
+  status: LiveLocationStatus;
+  mapError: string | null;
+  /** Latest GPS speed in m/s, or null when the phone doesn't know it. */
+  speedMps: number | null;
+  /** Posted limit of the road the car is matched to, m/s, or null when unknown. */
+  limitMps: number | null;
+  /** How far over the limit triggers a speeding warning, m/s. */
+  toleranceMps: number;
+}> {
   const [status, setStatus] = useState<LiveLocationStatus>('idle');
+  const [speedMps, setSpeedMps] = useState<number | null>(null);
+  const [limitMps, setLimitMps] = useState<number | null>(null);
+  const [toleranceMps, setToleranceMps] = useState(0);
   const [mapError, setMapError] = useState<string | null>(null);
   // Keep the latest callback without restarting GPS when the parent re-renders.
   const onEventRef = useRef(onEvent);
@@ -37,7 +49,9 @@ export function useLiveLocation(
     setStatus('requesting');
     setMapError(null);
 
-    const session = createLiveLocationSession(
+    setSpeedMps(null);
+    setLimitMps(null);
+    const { session, speeding } = createLiveLocationSession(
       voice,
       (event) => !cancelled && onEventRef.current(event),
       (err) => {
@@ -81,6 +95,9 @@ export function useLiveLocation(
               void session.prime(fix).catch(() => undefined);
             }
             session.onFix(fix);
+            setSpeedMps(fix.speed >= 0 ? fix.speed : null);
+            setLimitMps(speeding.currentLimitMps);
+            setToleranceMps(speeding.toleranceMps);
           },
         );
         if (cancelled) subscription.remove();
@@ -97,5 +114,5 @@ export function useLiveLocation(
     };
   }, [enabled, voice]);
 
-  return { status, mapError };
+  return { status, mapError, speedMps, limitMps, toleranceMps };
 }

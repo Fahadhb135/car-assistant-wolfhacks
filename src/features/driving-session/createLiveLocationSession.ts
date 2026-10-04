@@ -35,16 +35,17 @@ export function createLiveLocationSession(
   voice: Pick<VoiceCoordinator, 'handleEvent'>,
   onEvent: (event: DriveEvent) => void,
   onError: (err: unknown) => void,
-): DriveSession {
+): { session: DriveSession; speeding: SpeedingCoach } {
+  const speeding = new SpeedingCoach();
   const tiles = new TileCache({
     client: new OverpassClient(),
     store: prefetchedStore(),
     bundled: tileFixture as unknown as Record<TileKey, TileContents>,
     onError: (_key, err) => onError(err),
   });
-  return new DriveSession({
+  const session = new DriveSession({
     coach: new LocationCoach(),
-    speeding: new SpeedingCoach(),
+    speeding,
     tiles,
     region: new RegionPrefetcher(),
     onRegion: (region) =>
@@ -56,4 +57,5 @@ export function createLiveLocationSession(
     onEvent,
     onError,
   });
+  return { session, speeding };
 }

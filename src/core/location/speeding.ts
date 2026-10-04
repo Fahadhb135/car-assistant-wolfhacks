@@ -31,6 +31,7 @@ export class SpeedingCoach {
   private overCount = 0;
   private lastWarnAt: number | null = null;
   private backUnderSinceWarn = false;
+  private limitMps: number | null = null;
 
   constructor(opts: SpeedingCoachOptions = {}) {
     this.opts = {
@@ -44,12 +45,24 @@ export class SpeedingCoach {
     };
   }
 
+  /** Posted limit of the road the car was last matched to, or null when unknown. For display. */
+  get currentLimitMps(): number | null {
+    return this.limitMps;
+  }
+
+  /** How far over the limit counts as speeding, for display. */
+  get toleranceMps(): number {
+    return this.opts.toleranceMps;
+  }
+
   update(fix: GpsFix, ways: readonly SpeedLimitWay[]): DriveEventInput[] {
     if (fix.speed < 0 || !hasHeading(fix.heading)) {
+      // Keep showing the last limit: heading drops out whenever the car stops.
       this.overCount = 0;
       return [];
     }
     const limit = matchRoad(fix, ways, this.opts.roadMatch)?.road;
+    this.limitMps = limit?.maxspeedMps ?? null;
     if (!limit || limit.maxspeedMps === null) {
       this.overCount = 0;
       return [];

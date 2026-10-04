@@ -88,4 +88,15 @@ describe('SpeedingCoach', () => {
     });
     assert.equal(drive(new SpeedingCoach(), [fast, nextStreetOver], 40, 10).length, 0);
   });
+
+  it('reports the matched road limit for display, keeping it while stopped', () => {
+    const coach = new SpeedingCoach();
+    assert.equal(coach.currentLimitMps, null);
+    drive(coach, [street()], 20, 1);
+    assert.equal(Math.round(coach.currentLimitMps! / MPH), 25);
+    coach.update({ ...START, t: 5_000, speed: 0, heading: -1 }, [street()]);
+    assert.equal(Math.round(coach.currentLimitMps! / MPH), 25, 'kept while stopped');
+    drive(coach, [street({ maxspeedMps: null })], 20, 1, 6_000);
+    assert.equal(coach.currentLimitMps, null, 'cleared on an untagged road');
+  });
 });

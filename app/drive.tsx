@@ -15,6 +15,7 @@ import {
 import { useCoachChat, type CoachChatApi } from '@/features/driving-session/useCoachChat';
 import { useDriveVoice } from '@/features/driving-session/useDriveVoice';
 import { useLiveImuDrive } from '@/features/driving-session/useLiveImuDrive';
+import { SpeedBadge } from '@/features/driving-session/SpeedBadge';
 import { useLiveLocation, type LiveLocationStatus } from '@/features/driving-session/useLiveLocation';
 import { useReplayDrive } from '@/features/driving-session/useReplayDrive';
 import { POLICIES } from '@/features/voice/phrases';
@@ -115,7 +116,12 @@ export default function DriveRoute() {
               {replayMode ? 'REPLAY ACTIVE' : 'DRIVE ACTIVE'}
             </Text>
           </View>
-          <Text variant="titleMedium" style={styles.timer}>{formatTime(elapsedSeconds)}</Text>
+          <View style={styles.topRight}>
+            <Text variant="titleMedium" style={styles.timer}>{formatTime(elapsedSeconds)}</Text>
+            {!replayMode ? (
+              <SpeedBadge speedMps={location.speedMps} limitMps={location.limitMps} toleranceMps={location.toleranceMps} />
+            ) : null}
+          </View>
         </View>
 
         <View style={styles.scoreSection} accessibilityLabel="Smoothness score 92 out of 100">
@@ -214,6 +220,7 @@ const styles = StyleSheet.create({
   safeArea: { backgroundColor: colors.forestDeep, flex: 1 },
   container: { flexGrow: 1, justifyContent: 'space-between', padding: 20, paddingBottom: 26 },
   topBar: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  topRight: { alignItems: 'center', flexDirection: 'row', gap: 12 },
   livePill: { alignItems: 'center', backgroundColor: '#173A2A', borderRadius: 99, flexDirection: 'row', gap: 8, paddingHorizontal: 13, paddingVertical: 8 },
   liveDot: { backgroundColor: '#79D69F', borderRadius: 5, height: 9, width: 9 },
   liveText: { color: '#A8DDBD', fontWeight: '800', letterSpacing: 1 },
