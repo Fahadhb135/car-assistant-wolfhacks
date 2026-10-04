@@ -27,9 +27,13 @@ export function describeEvent(e: DriveEvent): string {
     case 'stop_ok':
       return 'The driver stopped correctly at a stop sign.';
     case 'rolling_stop':
-      return 'The driver rolled through a stop sign.';
+      return e.minSpeedMps !== undefined
+        ? `The driver rolled through a stop sign (slowest about ${mph(e.minSpeedMps)} mph).`
+        : 'The driver rolled through a stop sign.';
     case 'ran_stop':
-      return 'The driver ran a stop sign.';
+      return e.minSpeedMps !== undefined
+        ? `The driver ran a stop sign (never below about ${mph(e.minSpeedMps)} mph).`
+        : 'The driver ran a stop sign.';
     case 'traffic_light_ahead':
       return `A traffic light was ahead (${Math.round(e.distanceM)} m).`;
     case 'highway_entering':
@@ -42,7 +46,11 @@ export function describeEvent(e: DriveEvent): string {
         : 'The driver took the exit ramp at a good speed.';
     case 'speeding':
       return `The driver was speeding (${mph(e.speedMps)} mph in a ${mph(e.limitMps)} mph zone${e.road ? ` on ${e.road}` : ''}).`;
-    case 'hotspot_ahead':
-      return 'The driver was warned about a spot where other drivers often have trouble.';
+    case 'hotspot_ahead': {
+      const habit = e.topKind === 'ran_stop' ? 'run the stop sign'
+        : e.topKind === 'rolling_stop' ? 'roll through the stop sign'
+          : 'drive erratically';
+      return `Heads-up only: ${Math.round(e.distanceM)} m ahead (not reached yet) is a spot where ${e.drivers} other drivers often ${habit}.`;
+    }
   }
 }

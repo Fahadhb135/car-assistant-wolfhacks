@@ -1,4 +1,4 @@
-from lib.flatten import flatten_trip, grid_cell
+from lib.flatten import flatten_trip, grid_cell, transcript_rows
 
 TRIP = {
     "tripId": "t1", "driverId": "d1", "start": 1_000, "end": 61_000,
@@ -33,6 +33,28 @@ def test_event_rows_flag_bad_and_grid():
     assert ev[1]["gridCell"] is None
     assert ev[2]["confirmed"] is False
     assert ev[3]["evidenceJson"] == '{"durationMs": 300, "peakAccelerationG": 0.5}'
+
+
+def test_event_rows_keep_where_the_car_was_and_the_details():
+    trip = {**TRIP, "events": [{"eventId": "h", "t": 9, "kind": "highway_entering", "lat": 35.8, "lon": -78.6,
+                                "speedMps": 17.0, "limitMps": 29.1, "road": "I-40",
+                                "detail": {"advice": "speed_up", "targetSpeedMps": 29.1}}]}
+    row = flatten_trip(trip)[1][0]
+    assert (row["speedMps"], row["limitMps"], row["road"]) == (17.0, 29.1, "I-40")
+    assert row["detailJson"] == '{"advice": "speed_up", "targetSpeedMps": 29.1}'
+    assert row["isBad"] is False and row["gridCell"] == "35.800,-78.600"
+    old = flatten_trip(TRIP)[1][1]  # older uploads without these fields still flatten
+    assert old["speedMps"] is None and old["detailJson"] is None
+
+
+def test_transcript_rows():
+    trip = {**TRIP, "transcript": [{"t": 10, "role": "assistant", "text": "Nice full stop."},
+                                   {"t": 20, "role": "driver", "text": "How was that?"}]}
+    assert transcript_rows(trip) == [
+        {"tripId": "t1", "driverId": "d1", "turnIdx": 0, "tMs": 10, "role": "assistant", "text": "Nice full stop."},
+        {"tripId": "t1", "driverId": "d1", "turnIdx": 1, "tMs": 20, "role": "driver", "text": "How was that?"},
+    ]
+    assert transcript_rows(TRIP) == []
 
 
 def test_nearby_events_share_a_cell_far_ones_do_not():

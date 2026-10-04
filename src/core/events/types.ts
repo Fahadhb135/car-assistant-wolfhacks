@@ -24,7 +24,13 @@ export type DriveEventBody =
       advice: 'speed_up' | 'slow_down' | 'ok';
       road?: string;
     }
-  | { kind: 'stop_ok' | 'rolling_stop' | 'ran_stop'; severity: 'info' | 'warn' }
+  | {
+      kind: 'stop_ok' | 'rolling_stop' | 'ran_stop';
+      severity: 'info' | 'warn';
+      /** The stop sign (OSM node id) and the slowest GPS speed near it, when judged live. */
+      featureId?: number;
+      minSpeedMps?: number;
+    }
   | {
       /** Car stayed over the posted limit of the road it is on (OSM maxspeed). Speeds in m/s. */
       kind: 'speeding';

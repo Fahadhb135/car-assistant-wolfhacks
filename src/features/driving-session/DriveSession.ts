@@ -81,6 +81,11 @@ export class DriveSession {
       .catch((err) => onError?.(err));
   }
 
+  /** Crowd hotspots arrive from the cloud after the drive starts (fetched near the first fix). */
+  setHotspots(hotspots: { update(fix: GpsFix): DriveEventInput[] } | null): void {
+    this.deps = { ...this.deps, hotspots };
+  }
+
   /** Load the map around the starting point before the drive begins (used by replay). */
   async prime(fix: GpsFix): Promise<void> {
     await this.deps.tiles.update(fix);

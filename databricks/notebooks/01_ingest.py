@@ -7,7 +7,7 @@
 import json, os, sys
 
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), "..")))  # repo's databricks/ folder
-from lib.flatten import flatten_trip
+from lib.flatten import flatten_trip, transcript_rows
 
 dbutils.widgets.text("catalog", "carassistant")
 dbutils.widgets.text("schema", "default")
@@ -22,23 +22,27 @@ spark.sql(f"""CREATE TABLE IF NOT EXISTS {CAT}.{SCH}.trips (
   smoothness DOUBLE, stopCompliance DOUBLE, nEvents INT, nBadEvents INT, hadCrash BOOLEAN)""")
 spark.sql(f"""CREATE TABLE IF NOT EXISTS {CAT}.{SCH}.events (
   tripId STRING, driverId STRING, eventId STRING, tMs BIGINT, kind STRING, isBad BOOLEAN,
-  lat DOUBLE, lon DOUBLE, score DOUBLE, confirmed BOOLEAN, evidenceJson STRING, gridCell STRING)""")
+  lat DOUBLE, lon DOUBLE, score DOUBLE, confirmed BOOLEAN, evidenceJson STRING, gridCell STRING,
+  speedMps DOUBLE, limitMps DOUBLE, road STRING, detailJson STRING)""")
 # CREATE TABLE IF NOT EXISTS does not evolve existing workspaces.
 event_columns = spark.table(f"{CAT}.{SCH}.events").columns
-if "confirmed" not in event_columns:
-    spark.sql(f"ALTER TABLE {CAT}.{SCH}.events ADD COLUMNS (confirmed BOOLEAN)")
-if "evidenceJson" not in event_columns:
-    spark.sql(f"ALTER TABLE {CAT}.{SCH}.events ADD COLUMNS (evidenceJson STRING)")
+for col, typ in [("confirmed", "BOOLEAN"), ("evidenceJson", "STRING"), ("speedMps", "DOUBLE"),
+                 ("limitMps", "DOUBLE"), ("road", "STRING"), ("detailJson", "STRING")]:
+    if col not in event_columns:
+        spark.sql(f"ALTER TABLE {CAT}.{SCH}.events ADD COLUMNS ({col} {typ})")
+spark.sql(f"""CREATE TABLE IF NOT EXISTS {CAT}.{SCH}.transcript (
+  tripId STRING, driverId STRING, turnIdx INT, tMs BIGINT, role STRING, text STRING)""")
 spark.sql(f"""CREATE TABLE IF NOT EXISTS {CAT}.{SCH}.features (
   tripId STRING, driverId STRING, windowIdx INT, features ARRAY<DOUBLE>)""")
 
 # COMMAND ----------
 files = spark.read.option("wholetext", True).text(f"/Volumes/{CAT}/{SCH}/{VOL}/trips/*.json").collect()
-trips, events, feats = [], [], []
+trips, events, feats, said = [], [], [], []
 for row in files:
-    t, e, f = flatten_trip(json.loads(row.value))
-    trips.append(t); events += e; feats += f
-print(f"{len(trips)} trips, {len(events)} events, {len(feats)} feature windows")
+    raw = json.loads(row.value)
+    t, e, f = flatten_trip(raw)
+    trips.append(t); events += e; feats += f; said += transcript_rows(raw)
+print(f"{len(trips)} trips, {len(events)} events, {len(feats)} feature windows, {len(said)} coach/chat lines")
 
 # COMMAND ----------
 def upsert(rows, table, keys):
@@ -52,3 +56,4 @@ def upsert(rows, table, keys):
 upsert(trips, "trips", ["tripId"])
 upsert(events, "events", ["tripId", "eventId"])
 upsert(feats, "features", ["tripId", "windowIdx"])
+upsert(said, "transcript", ["tripId", "turnIdx"])

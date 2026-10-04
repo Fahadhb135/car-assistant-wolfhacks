@@ -14,6 +14,7 @@ export type AlertKind =
   | 'harsh_cornering'
   | 'stop_ok'
   | 'chat_reply'
+  | 'live_coach'
   | 'coaching_tip';
 
 /** One sentence of a streamed reply: its text, plus server-made audio when available. */
@@ -29,6 +30,8 @@ export type Utterance = {
   phraseId?: string;
   /** Set for streamed chat replies; spoken sentence by sentence as they arrive. */
   stream?: SpokenStream;
+  /** Speak with the phone's built-in voice right away (live coaching: lowest latency). */
+  deviceVoice?: boolean;
 };
 
 export type Alert = {
@@ -40,6 +43,8 @@ export type Alert = {
   createdAt: number;
   /** Alert is dropped, not spoken late, once older than this. */
   ttlMs: number;
+  /** What the alert is about (a stop sign's id, a hotspot cell). Cooldowns apply per target. */
+  target?: string;
 };
 
 /** Plays one utterance. Must settle (resolve or reject) promptly when `signal` aborts. */

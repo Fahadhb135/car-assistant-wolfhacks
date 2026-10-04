@@ -129,7 +129,8 @@ describe('LocationCoach feature announcements', () => {
 
   it('announces each stop sign and traffic light once, at ~150 m', () => {
     const coach = new LocationCoach();
-    const events = run(coach, west(600, 1350), [light, stop]);
+    const all = run(coach, west(600, 1350), [light, stop]);
+    const events = all.filter((e) => e.kind.endsWith('_ahead'));
     assert.deepEqual(
       events.map((e) => [e.kind, (e as { featureId: number }).featureId]),
       [
@@ -138,6 +139,8 @@ describe('LocationCoach feature announcements', () => {
       ],
     );
     for (const e of events) assert.ok((e as { distanceM: number }).distanceM <= 150);
+    // The synthetic car drives through the stop sign without slowing down.
+    assert.deepEqual(all.filter((e) => !e.kind.endsWith('_ahead')).map((e) => e.kind), ['ran_stop']);
   });
 
   it('announces an intersection with several stop-sign nodes once', () => {
@@ -148,7 +151,7 @@ describe('LocationCoach feature announcements', () => {
       facingDeg: null,
     }));
     const coach = new LocationCoach();
-    const events = run(coach, west(700, 1050), allWay);
+    const events = run(coach, west(700, 1050), allWay).filter((e) => e.kind === 'stop_sign_ahead');
     assert.deepEqual(events.map((e) => (e as { featureId: number }).featureId), [60]);
   });
 

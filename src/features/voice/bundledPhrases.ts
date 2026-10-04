@@ -18,4 +18,9 @@ export const BUNDLED_PHRASES: Record<BundledPhraseId, number> = {
   hotspot_rolling: require('../../../assets/audio/hotspot_rolling.mp3'),
   hotspot_ran: require('../../../assets/audio/hotspot_ran.mp3'),
   hotspot_erratic: require('../../../assets/audio/hotspot_erratic.mp3'),
+  speeding: require('../../../assets/audio/speeding.mp3'),
+  hard_braking: require('../../../assets/audio/hard_braking.mp3'),
+  rapid_acceleration: require('../../../assets/audio/rapid_acceleration.mp3'),
+  harsh_cornering: require('../../../assets/audio/harsh_cornering.mp3'),
+  reply_fallback: require('../../../assets/audio/reply_fallback.mp3'),
 };

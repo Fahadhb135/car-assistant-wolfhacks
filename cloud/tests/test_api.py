@@ -30,6 +30,32 @@ def test_health(make):
     assert make().get("/health").json() == {"ok": True}
 
 
+class FakeTts:
+    def __init__(self, audio):
+        self.audio, self.texts = audio, []
+
+    async def synthesize(self, text, previous_text=None):
+        self.texts.append(text)
+        return self.audio
+
+
+def test_tts_returns_elevenlabs_audio(make):
+    tts = FakeTts(b"ID3fake-mp3")
+    r = make(tts=tts).post("/tts", json={"text": "Brake gently."})
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "audio/mpeg"
+    assert r.content == b"ID3fake-mp3"
+    assert tts.texts == ["Brake gently."]
+
+
+def test_tts_is_503_when_speech_fails_so_the_phone_falls_back(make):
+    assert make(tts=FakeTts(None)).post("/tts", json={"text": "hi"}).status_code == 503
+
+
+def test_tts_rejects_empty_text(make):
+    assert make(tts=FakeTts(b"x")).post("/tts", json={"text": ""}).status_code == 422
+
+
 def test_trip_upload_is_idempotent(make):
     c = make()
     assert c.post("/trips", json=TRIP).json()["created"] is True

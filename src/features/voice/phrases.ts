@@ -10,13 +10,16 @@ export type AlertPolicy = {
 export const POLICIES: Record<AlertKind, AlertPolicy> = {
   crash: { priority: 100, ttlMs: 10_000, cooldownMs: 5_000 },
   ran_stop: { priority: 80, ttlMs: 5_000, cooldownMs: 10_000 },
-  stop_sign_ahead: { priority: 70, ttlMs: 3_000, cooldownMs: 8_000 },
+  // Location alerts carry a target (the sign, light or hotspot), and their cooldown applies per
+  // target, so a second sign right behind the first is still announced. The ttl leaves room to
+  // wait behind one ~3 s clip without being dropped.
+  stop_sign_ahead: { priority: 70, ttlMs: 6_000, cooldownMs: 8_000 },
   // Hotspot warnings are spoken ~250 m out so they finish before the 150 m stop-sign alert,
   // which outranks them (README order: stop sign > highway > traffic light > swerve > tips).
-  hotspot_ahead: { priority: 65, ttlMs: 6_000, cooldownMs: 3_000 },
+  hotspot_ahead: { priority: 65, ttlMs: 8_000, cooldownMs: 3_000 },
   highway_entering: { priority: 58, ttlMs: 6_000, cooldownMs: 15_000 },
   highway_exiting: { priority: 58, ttlMs: 6_000, cooldownMs: 15_000 },
-  traffic_light_ahead: { priority: 55, ttlMs: 4_000, cooldownMs: 5_000 },
+  traffic_light_ahead: { priority: 55, ttlMs: 6_000, cooldownMs: 5_000 },
   rolling_stop: { priority: 60, ttlMs: 5_000, cooldownMs: 10_000 },
   // Below stop signs and highway merges, above traffic lights; SpeedingCoach has its own cooldown.
   speeding: { priority: 57, ttlMs: 4_000, cooldownMs: 15_000 },
@@ -26,6 +29,9 @@ export const POLICIES: Record<AlertKind, AlertPolicy> = {
   harsh_cornering: { priority: 46, ttlMs: 5_000, cooldownMs: 20_000 },
   stop_ok: { priority: 20, ttlMs: 4_000, cooldownMs: 15_000 },
   chat_reply: { priority: 30, ttlMs: 15_000, cooldownMs: 0 },
+  // Gemini's on-the-spot remark after a notable moment. Below every safety alert and the driver's
+  // own questions; dropped rather than said late. LiveCoach throttles how often it asks.
+  live_coach: { priority: 25, ttlMs: 8_000, cooldownMs: 0 },
   coaching_tip: { priority: 10, ttlMs: 30_000, cooldownMs: 60_000 },
 };
 
@@ -45,15 +51,19 @@ export const PHRASES = {
   hotspot_rolling: 'Heads up. Drivers often roll through the stop here.',
   hotspot_ran: 'Heads up. Drivers often run the stop here.',
   hotspot_erratic: 'Take extra care here. Other drivers often struggle in this area.',
+  hard_braking: 'Brake more smoothly and leave extra space ahead.',
+  rapid_acceleration: 'Ease onto the accelerator for a smoother start.',
+  harsh_cornering: 'Slow down before the turn and steer smoothly.',
+  reply_fallback: "Sorry, I can't answer that right now.",
 } as const;
 
 export type PhraseId = keyof typeof PHRASES;
 
 /** Phrases with no generated ElevenLabs clip yet; run `npm run phrases` with a key, then remove them. */
-export type PhraseWithoutAudio = 'speeding';
+export type PhraseWithoutAudio = never;
 /** Phrases that have a bundled clip in assets/audio. */
 export type BundledPhraseId = Exclude<PhraseId, PhraseWithoutAudio>;
-const PHRASES_WITHOUT_AUDIO = new Set<PhraseId>(['speeding'] satisfies PhraseWithoutAudio[]);
+const PHRASES_WITHOUT_AUDIO = new Set<PhraseId>([] satisfies PhraseWithoutAudio[]);
 
 /** Fixed phrase for an event, or null when it should stay silent (e.g. a highway ramp taken at a good speed). */
 function phraseFor(event: DriveEvent): PhraseId | null {
@@ -71,7 +81,7 @@ function phraseFor(event: DriveEvent): PhraseId | null {
     case 'hard_braking':
     case 'rapid_acceleration':
     case 'harsh_cornering':
-      return null;
+      return event.kind;
     case 'stop_ok':
       return 'stop_ok';
     case 'traffic_light_ahead':
@@ -91,31 +101,34 @@ function phraseFor(event: DriveEvent): PhraseId | null {
   }
 }
 
+/** The sign, light or hotspot an alert is about, so cooldowns don't swallow a different one. */
+function targetFor(event: DriveEvent): string | undefined {
+  switch (event.kind) {
+    case 'stop_sign_ahead':
+    case 'traffic_light_ahead':
+      return event.featureId !== undefined ? String(event.featureId) : undefined;
+    case 'hotspot_ahead':
+      return event.cell;
+    default:
+      return undefined;
+  }
+}
+
 export function alertFromEvent(event: DriveEvent): Alert | null {
-  const dynamicText = event.kind === 'hard_braking'
-    ? 'Brake more smoothly and leave extra space ahead.'
-    : event.kind === 'rapid_acceleration'
-      ? 'Ease onto the accelerator for a smoother start.'
-      : event.kind === 'harsh_cornering'
-        ? 'Slow down before the turn and steer smoothly.'
-        : undefined;
   const phraseId = phraseFor(event);
-  if (!dynamicText && !phraseId) return null;
+  if (!phraseId) return null;
   const policy = POLICIES[event.kind];
-  // No bundled clip for these yet, so they use device TTS (see PHRASES_WITHOUT_AUDIO).
-  const bundledPhraseId = !phraseId
-    || (event.kind === 'crash' && !event.confirmed)
-    || PHRASES_WITHOUT_AUDIO.has(phraseId)
-    ? undefined
-    : phraseId;
+  // Every fixed phrase has a bundled ElevenLabs clip; device TTS is only the chain's last resort.
+  const bundledPhraseId = PHRASES_WITHOUT_AUDIO.has(phraseId) ? undefined : phraseId;
+  const target = targetFor(event);
   return {
     id: event.eventId,
     kind: event.kind,
     priority: policy.priority,
-    // New experimental behaviors and unconfirmed crashes use device TTS rather than stale assets.
-    utterance: { text: dynamicText ?? PHRASES[phraseId!], phraseId: bundledPhraseId },
+    utterance: { text: PHRASES[phraseId], phraseId: bundledPhraseId },
     createdAt: event.t,
     ttlMs: policy.ttlMs,
+    ...(target !== undefined ? { target } : {}),
   };
 }
 
@@ -138,15 +151,31 @@ export function chatReplyAlert(id: string, text: string, now: number): Alert {
     id,
     kind: 'chat_reply',
     priority: policy.priority,
-    utterance: { text },
+    utterance: text === REPLY_FALLBACK_TEXT ? { text, phraseId: 'reply_fallback' } : { text },
     createdAt: now,
     ttlMs: policy.ttlMs,
   };
 }
 
-export const REPLY_FALLBACK_TEXT = "Sorry, I can't answer that right now.";
+/** A live coaching remark from Gemini, spoken with the phone's built-in voice for speed. */
+export function liveCoachAlert(id: string, text: string, now: number): Alert {
+  const policy = POLICIES.live_coach;
+  return {
+    id,
+    kind: 'live_coach',
+    priority: policy.priority,
+    utterance: { text, deviceVoice: true },
+    createdAt: now,
+    ttlMs: policy.ttlMs,
+  };
+}
+
+export const REPLY_FALLBACK_TEXT = PHRASES.reply_fallback;
 
 /** A chat reply that is still streaming in. Outranks tips, never a safety alert. */
 export function chatReplyStreamAlert(id: string, stream: SpokenStream, now: number): Alert {
-  return { ...chatReplyAlert(id, REPLY_FALLBACK_TEXT, now), utterance: { text: REPLY_FALLBACK_TEXT, stream } };
+  return {
+    ...chatReplyAlert(id, REPLY_FALLBACK_TEXT, now),
+    utterance: { text: REPLY_FALLBACK_TEXT, phraseId: 'reply_fallback', stream },
+  };
 }

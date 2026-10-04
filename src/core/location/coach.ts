@@ -2,16 +2,18 @@ import type { HighwayEvent, LocationEvent } from './events';
 import type { FeatureAhead } from './featureFilter';
 import { distanceM as dist } from './geo';
 import { matchRoad, nearestRoad, type RoadMatchOptions } from './roads';
+import { StopComplianceTracker, type StopComplianceOptions } from './stopCompliance';
 import type { GpsFix, RoadWay } from './types';
 
 // Turns GPS fixes plus nearby map data into coaching events:
 //   stop_sign_ahead / traffic_light_ahead   once per intersection, at ~150 m
+//   stop_ok / rolling_stop / ran_stop       how the car handled an announced stop sign
 //   highway_entering                        local road -> on-ramp: speed up to merge
 //   highway_exiting                         highway -> off-ramp: slow down for the ramp
 //
 // Road class changes must hold for a few consecutive fixes before they count,
-// so GPS jitter near a ramp's gore point doesn't flip-flop. Stop compliance
-// (rolling_stop / ran_stop) is a separate state machine, not built yet.
+// so GPS jitter near a ramp's gore point doesn't flip-flop. Stop compliance is its own
+// state machine (stopCompliance.ts), fed the signs this coach announces.
 
 export type RoadClass = 'local' | 'ramp' | 'highway';
 
@@ -35,18 +37,24 @@ export type LocationCoachOptions = {
   /** How far off the target speed counts as "change speed". Default 10 mph. */
   speedToleranceMps?: number;
   roadMatch?: RoadMatchOptions;
+  stopCompliance?: StopComplianceOptions;
 };
 
 const MPH = 0.44704;
 
 export class LocationCoach {
-  private readonly opts: Required<Omit<LocationCoachOptions, 'roadMatch'>> & { roadMatch?: RoadMatchOptions };
+  private readonly opts: Required<Omit<LocationCoachOptions, 'roadMatch' | 'stopCompliance'>> & {
+    roadMatch?: RoadMatchOptions;
+    stopCompliance?: StopComplianceOptions;
+  };
   private readonly lastSeen = new Map<number, number>();
   private confirmed: RoadClass = 'local';
   private candidate: RoadClass = 'local';
   private candidateCount = 0;
+  private readonly stops: StopComplianceTracker;
 
   constructor(opts: LocationCoachOptions = {}) {
+    this.stops = new StopComplianceTracker(opts.stopCompliance);
     this.opts = {
       announceDistanceM: 150,
       clusterRadiusM: 40,
@@ -69,7 +77,13 @@ export class LocationCoach {
    * ways around it (both from the tile cache). Returns any new events.
    */
   update(fix: GpsFix, ahead: readonly FeatureAhead[], roads: readonly RoadWay[]): LocationEvent[] {
-    return [...this.announceFeatures(fix, ahead), ...this.trackHighway(fix, roads)];
+    const announced = this.announceFeatures(fix, ahead);
+    for (const e of announced) {
+      if (e.kind !== 'stop_sign_ahead') continue;
+      const sign = ahead.find((a) => a.feature.id === e.featureId)?.feature;
+      if (sign) this.stops.follow(e.featureId, sign, fix.t);
+    }
+    return [...announced, ...this.stops.update(fix), ...this.trackHighway(fix, roads)];
   }
 
   private announceFeatures(fix: GpsFix, ahead: readonly FeatureAhead[]): LocationEvent[] {

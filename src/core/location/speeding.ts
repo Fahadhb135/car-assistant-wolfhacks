@@ -32,6 +32,7 @@ export class SpeedingCoach {
   private lastWarnAt: number | null = null;
   private backUnderSinceWarn = false;
   private limitMps: number | null = null;
+  private road: string | null = null;
 
   constructor(opts: SpeedingCoachOptions = {}) {
     this.opts = {
@@ -50,6 +51,11 @@ export class SpeedingCoach {
     return this.limitMps;
   }
 
+  /** Ref or name of the road the car was last matched to (e.g. "I-40"), or null. For context. */
+  get currentRoad(): string | null {
+    return this.road;
+  }
+
   /** How far over the limit counts as speeding, for display. */
   get toleranceMps(): number {
     return this.opts.toleranceMps;
@@ -63,6 +69,7 @@ export class SpeedingCoach {
     }
     const limit = matchRoad(fix, ways, this.opts.roadMatch)?.road;
     this.limitMps = limit?.maxspeedMps ?? null;
+    this.road = limit ? limit.ref ?? limit.name ?? null : null;
     if (!limit || limit.maxspeedMps === null) {
       this.overCount = 0;
       return [];

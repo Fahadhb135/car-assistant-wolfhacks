@@ -1,4 +1,4 @@
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -14,6 +14,12 @@ class TripEvent(BaseModel):
     kind: EventKind
     lat: Optional[float] = None
     lon: Optional[float] = None
+    # Where the car was when it happened (GPS speed, the road's posted limit, its name).
+    speedMps: Optional[float] = None
+    limitMps: Optional[float] = None
+    road: Optional[str] = Field(default=None, max_length=120)
+    # Kind-specific extras, e.g. distanceM to a stop sign, highway advice, a hotspot's topKind.
+    detail: Optional[dict[str, Union[float, str, bool]]] = None
     score: Optional[float] = None
     evidence: Optional[dict[str, float]] = None
     # Heuristic crash candidates remain explicitly unconfirmed through storage and reporting.

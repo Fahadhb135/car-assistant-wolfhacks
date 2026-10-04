@@ -1,6 +1,9 @@
 import * as Location from 'expo-location';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
+import { HotspotIndex } from '../../core/coaching/hotspots';
+import type { GpsFix } from '../../core/location/types';
+import { fetchHotspots } from '../../integrations/backend/hotspotsClient';
 import { createLiveLocationSession } from './createLiveLocationSession';
 import type { DriveEventSink } from './DriveEventGate';
 import { toGpsFix } from './gpsFix';
@@ -20,6 +23,8 @@ export type LiveLocationStatus = 'idle' | 'requesting' | 'denied' | 'waiting' | 
 export function useLiveLocation(
   enabled: boolean,
   eventSink: DriveEventSink,
+  /** Each fix, before it is coached, with the matched road's limit and name (live context). */
+  onFix?: (fix: GpsFix, limitMps: number | null, road: string | null) => void,
 ): Readonly<{
   status: LiveLocationStatus;
   mapError: string | null;
@@ -35,6 +40,8 @@ export function useLiveLocation(
   const [limitMps, setLimitMps] = useState<number | null>(null);
   const [toleranceMps, setToleranceMps] = useState(0);
   const [mapError, setMapError] = useState<string | null>(null);
+  const onFixRef = useRef(onFix);
+  onFixRef.current = onFix;
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
@@ -86,7 +93,17 @@ export function useLiveLocation(
               setStatus('tracking');
               // Start loading the surrounding map tiles right away.
               void session.prime(fix).catch(() => undefined);
+              // Crowd hotspots (Databricks-published) for this area, once per drive.
+              const baseUrl = process.env.EXPO_PUBLIC_API_URL;
+              if (baseUrl) {
+                void fetchHotspots({ baseUrl, lat: fix.lat, lon: fix.lon }).then((snapshot) => {
+                  if (cancelled || !snapshot) return;
+                  console.info(`[live location] ${snapshot.hotspots.length} crowd hotspots from ${snapshot.source}`);
+                  session.setHotspots(new HotspotIndex(snapshot));
+                });
+              }
             }
+            onFixRef.current?.(fix, speeding.currentLimitMps, speeding.currentRoad);
             session.onFix(fix);
             setSpeedMps(fix.speed >= 0 ? fix.speed : null);
             setLimitMps(speeding.currentLimitMps);
