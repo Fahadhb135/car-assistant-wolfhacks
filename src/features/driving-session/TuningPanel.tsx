@@ -73,6 +73,22 @@ export function TuningPanel({ visible, onDismiss, motion }: Readonly<{
           </Text>
           <Text variant="bodySmall" style={styles.hint}>Higher sensitivity lowers the thresholds. Changes apply instantly.</Text>
 
+          <Divider style={styles.divider} />
+          <View style={styles.row}>
+            <View style={styles.label}>
+              <Text variant="titleMedium" style={styles.overallTitle}>All detectors</Text>
+              <Text variant="bodySmall" style={styles.detail}>Multiplies every sensitivity below</Text>
+            </View>
+            <Stepper
+              value={tuning.overallSensitivity}
+              label={`${tuning.overallSensitivity.toFixed(1)}×`}
+              step={SENSITIVITY.step}
+              min={SENSITIVITY.min}
+              max={SENSITIVITY.max}
+              onChange={(value) => update((current) => ({ ...current, overallSensitivity: clampSensitivity(value) }))}
+            />
+          </View>
+
           {DETECTOR_KEYS.map((key) => {
             const detector = tuning.detectors[key];
             return (
@@ -142,6 +158,7 @@ const styles = StyleSheet.create({
   divider: { marginVertical: 8 },
   row: { alignItems: 'center', flexDirection: 'row', gap: 8, justifyContent: 'space-between' },
   label: { color: colors.ink, flex: 1, fontWeight: '700' },
+  overallTitle: { color: colors.forest, fontWeight: '800' },
   detail: { color: colors.muted, flex: 1 },
   off: { opacity: 0.4 },
   stepper: { alignItems: 'center', flexDirection: 'row' },

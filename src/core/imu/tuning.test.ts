@@ -26,6 +26,18 @@ test('sensitivity 2 halves a detector threshold; every extreme combination stays
   }
 });
 
+test('overall sensitivity multiplies every detector', () => {
+  const config = tuningToConfig({ ...withDetector('hardBraking', { sensitivity: 2 }), overallSensitivity: 2 });
+  const defaults = DEFAULT_IMU_PIPELINE_CONFIG;
+  assert.equal(config.behaviors.hardBraking.triggerLongitudinalG, defaults.behaviors.hardBraking.triggerLongitudinalG / 4);
+  assert.equal(config.behaviors.harshCornering.triggerLateralG, defaults.behaviors.harshCornering.triggerLateralG / 2);
+  assert.equal(config.crash.triggerAccelerationG, defaults.crash.triggerAccelerationG / 2);
+  for (const overallSensitivity of [SENSITIVITY.min, SENSITIVITY.max]) {
+    const detectors = Object.fromEntries(DETECTOR_KEYS.map((key) => [key, { enabled: true, sensitivity: overallSensitivity }]));
+    assert.doesNotThrow(() => resolvePipelineConfig(tuningToConfig(normalizeTuning({ detectors, overallSensitivity }))));
+  }
+});
+
 test('normalizes a missing or corrupt saved file to in-range values', () => {
   assert.deepEqual(normalizeTuning(null), DEFAULT_IMU_TUNING);
   const tuning = normalizeTuning({ detectors: { swerve: { enabled: false, sensitivity: 9 } }, turnHeadingDeg: 1 });

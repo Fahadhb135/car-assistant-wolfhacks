@@ -9,6 +9,8 @@ export type DetectorTuning = Readonly<{ enabled: boolean; sensitivity: number }>
 /** Live, user-adjustable knobs over the default heuristics. Sensitivity 2 halves every threshold. */
 export type ImuTuning = Readonly<{
   detectors: Readonly<Record<DetectorKey, DetectorTuning>>;
+  /** Multiplies every detector's sensitivity: one knob to make everything more or less eager. */
+  overallSensitivity: number;
   /** Ignore braking/acceleration/cornering/drastic slowing while the board tilts fast. */
   tiltGuard: boolean;
   /** Heading a sharp turn must sweep in one direction. */
@@ -28,6 +30,7 @@ export const DEFAULT_IMU_TUNING: ImuTuning = Object.freeze({
     harshCornering: { enabled: true, sensitivity: 1 },
     swerve: { enabled: true, sensitivity: 1 },
   }),
+  overallSensitivity: 1,
   tiltGuard: true,
   turnHeadingDeg: D.behaviors.harshCornering.minimumHeadingChangeDeg,
 });
@@ -55,6 +58,7 @@ export function clampTurnHeading(value: number): number {
 export function normalizeTuning(value: unknown): ImuTuning {
   const input = (value && typeof value === 'object' ? value : {}) as Partial<{
     detectors: Partial<Record<DetectorKey, Partial<DetectorTuning>>>;
+    overallSensitivity: unknown;
     tiltGuard: unknown;
     turnHeadingDeg: unknown;
   }>;
@@ -70,6 +74,9 @@ export function normalizeTuning(value: unknown): ImuTuning {
   }
   return {
     detectors,
+    overallSensitivity: typeof input.overallSensitivity === 'number' && Number.isFinite(input.overallSensitivity)
+      ? clampSensitivity(input.overallSensitivity)
+      : 1,
     tiltGuard: typeof input.tiltGuard === 'boolean' ? input.tiltGuard : DEFAULT_IMU_TUNING.tiltGuard,
     turnHeadingDeg: typeof input.turnHeadingDeg === 'number' && Number.isFinite(input.turnHeadingDeg)
       ? clampTurnHeading(input.turnHeadingDeg)
@@ -79,7 +86,7 @@ export function normalizeTuning(value: unknown): ImuTuning {
 
 /** The full pipeline config for a tuning: every sensitivity-scaled threshold is the default divided by it. */
 export function tuningToConfig(tuning: ImuTuning): ImuPipelineConfig {
-  const s = (key: DetectorKey) => tuning.detectors[key].sensitivity;
+  const s = (key: DetectorKey) => tuning.detectors[key].sensitivity * tuning.overallSensitivity;
   const crash = s('crash');
   const brake = s('hardBraking');
   const accelerate = s('rapidAcceleration');
