@@ -83,7 +83,12 @@ export class DrivingBehaviorDetector {
   private stillSinceMs?: number;
   private peaks?: { -readonly [K in keyof MotionPeaks]: number };
 
-  constructor(private readonly config: DrivingBehaviorConfig) {}
+  constructor(private config: DrivingBehaviorConfig) {}
+
+  /** Swaps thresholds live, keeping in-flight state (episodes, cooldowns, learned resting level). */
+  setConfig(config: DrivingBehaviorConfig): void {
+    this.config = config;
+  }
 
   process(sample: VehicleFrameSample): readonly ImuEvent[] {
     const events: ImuEvent[] = [];

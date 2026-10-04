@@ -151,9 +151,6 @@ export function resolvePipelineConfig(partial: PartialImuPipelineConfig = {}): I
   if (severe.releaseLongitudinalG < 0 || severe.releaseLongitudinalG >= severe.triggerLongitudinalG) {
     throw new Error('severeDeceleration releaseLongitudinalG must be non-negative and below its trigger');
   }
-  if (severe.triggerLongitudinalG <= config.behaviors.hardBraking.triggerLongitudinalG) {
-    throw new Error('severeDeceleration must trigger above hard braking');
-  }
   positive(severe.minimumDurationMs, 'severeDeceleration minimumDurationMs');
   if (!(severe.tiltExemptG >= severe.triggerLongitudinalG)) {
     throw new Error('severeDeceleration tiltExemptG must be at or above its trigger');

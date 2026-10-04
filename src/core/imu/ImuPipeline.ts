@@ -15,6 +15,7 @@ import type {
   PartialImuPipelineConfig,
   StreamHealthSnapshot,
 } from './types';
+import { enabledKinds, tuningToConfig, type ImuTuning } from './tuning';
 import { toVehicleFrame, type VehicleFrameCalibration } from './VehicleFrame';
 
 const NON_CRASH_PRIORITY: Readonly<Record<ImuEvent['kind'], number>> = Object.freeze({
@@ -26,7 +27,8 @@ const NON_CRASH_PRIORITY: Readonly<Record<ImuEvent['kind'], number>> = Object.fr
 });
 
 export class ImuPipeline {
-  private readonly config;
+  private config;
+  private enabled?: ReadonlySet<ImuEvent['kind']>;
   private readonly validator;
   private readonly health = new StreamHealth();
   private readonly buffer;
@@ -48,6 +50,15 @@ export class ImuPipeline {
     this.crashDetector = new CrashCandidateDetector(this.config.crash);
     this.swerveDetector = new SwerveCandidateDetector(this.config.swerve);
     this.behaviorDetector = new DrivingBehaviorDetector(this.config.behaviors);
+  }
+
+  /** Applies live tuning (thresholds and which detectors are on) without losing stream state. */
+  setTuning(tuning: ImuTuning): void {
+    this.config = resolvePipelineConfig(tuningToConfig(tuning));
+    this.enabled = enabledKinds(tuning);
+    this.crashDetector.setConfig(this.config.crash);
+    this.swerveDetector.setConfig(this.config.swerve);
+    this.behaviorDetector.setConfig(this.config.behaviors);
   }
 
   setVehicleCalibration(calibration: VehicleFrameCalibration | undefined): void {
@@ -93,7 +104,11 @@ export class ImuPipeline {
       const event = this.swerveDetector.process(features);
       if (event) candidates.push(event);
     }
-    const events = this.arbitrate(candidates, sample.receivedMonotonicMs);
+    const enabled = this.enabled;
+    const events = this.arbitrate(
+      enabled ? candidates.filter((candidate) => enabled.has(candidate.kind)) : candidates,
+      sample.receivedMonotonicMs,
+    );
 
     return Object.freeze({
       accepted: true,

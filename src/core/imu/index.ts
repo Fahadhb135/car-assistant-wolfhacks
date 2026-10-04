@@ -16,3 +16,4 @@ export {
 } from './VehicleFrame';
 export type * from './VehicleFrame';
 export type * from './types';
+export * from './tuning';
