@@ -33,7 +33,7 @@ Window creation has a maximum catch-up count per input. After an extreme timesta
 
 The crash detector tracks acceleration magnitude, time above the trigger, excess-acceleration impulse, and peak angular velocity. Hysteresis and cooldown suppress duplicate events. A configurable continuity limit resets an impact episode across a data gap, so duration and impulse never integrate across unobserved time.
 
-Crash has absolute same-sample precedence. When multiple non-crash detectors emit together, the pipeline keeps exactly one in this deterministic order: hard braking, harsh cornering, rapid acceleration, then swerve. A global monotonic 60-second cooldown then permits at most one non-crash IMU candidate per minute (the exact 60-second boundary is admitted). A stream gap does not bypass that cooldown. `result.arbitration` and `getArbitrationState()` expose cooldown time plus total/per-kind suppression counts; `reset()` clears them.
+Crash has absolute same-sample precedence. When multiple non-crash detectors emit together, the pipeline keeps exactly one in this deterministic order: hard braking, harsh cornering, rapid acceleration, then swerve. A global monotonic 15-second cooldown then permits at most one non-crash IMU candidate per 15 seconds (the exact boundary is admitted). A stream gap does not bypass that cooldown. `result.arbitration` and `getArbitrationState()` expose cooldown time plus total/per-kind suppression counts; `reset()` clears them.
 
 Window features currently include acceleration and angular-velocity magnitude statistics, jerk, sample count, observed duration, sequence-based missing ratio, and direction changes/variation on a configured raw sensor rotation axis. The swerve heuristic uses those features with hysteresis and cooldown.
 
@@ -43,19 +43,35 @@ Hardware decoding still produces raw `sensor`-frame values. For a new SensorTile
 
 Calibration is rejected when the sample contains excessive acceleration variation, rotation, too few samples, or a degenerate orientation. Crash and raw-axis swerve processing continue, but hard-braking, rapid-acceleration, and harsh-corner candidates remain disabled until calibration succeeds.
 
-The behavior detectors use configurable trigger/release hysteresis, minimum duration, continuity gaps, and cooldowns. Longitudinal candidates also require a jerk transition. Cornering requires both lateral acceleration and yaw-rate evidence, which prevents an isolated vertical road bump from being called a corner. Evidence includes duration, peak acceleration, jerk, and rotation for tuning.
+The behavior detectors first low-pass filter the vehicle-frame forward, lateral, and yaw signals (100 ms time constant). At 120 Hz the raw sample-to-sample difference is mostly sensor noise and engine vibration: unfiltered, noise alone exceeded the jerk gate and vibration kept breaking corner episodes apart. They then use configurable trigger/release hysteresis, minimum duration, continuity gaps, and cooldowns. Longitudinal candidates also require a jerk transition, counted from the release level so the onset of the maneuver is included.
 
-### Conservative defaults
+Three guards separate driving from board handling (all measured on hand tests, where tilting and twisting produced false braking and turns):
+
+- **Resting level.** While the board is still (total acceleration within 0.02 g of 1 g, rotation under 3°/s) the forward/lateral reading can only be gravity from a mount that shifted since calibration. It is tracked with a 3 s time constant and subtracted, so a board that sags 27° does not read as permanent 0.45 g braking.
+- **Tilt guard.** Braking, acceleration, cornering, and drastic slowing are ignored while the board pitches or rolls faster than 45°/s, because tilting moves gravity onto those axes; a car pitches and rolls only a few °/s. Drastic slowing of 2 g or more is still a possible crash, since tilt adds at most 1 g.
+- **Heading.** A sharp turn must sweep at least 45° in one direction. Swerves and lane changes reverse after small arcs, which passes the yaw rate through zero and restarts the count. Cornering requires both lateral acceleration and yaw-rate evidence, which prevents an isolated vertical road bump from being called a corner. Evidence includes duration, peak acceleration, jerk, and rotation for tuning.
+
+### Defaults
 
 | Detector | Trigger evidence | Sustained duration / quality |
 |---|---|---|
-| Possible crash | acceleration magnitude ≥ 4.5 g and peak rotation ≥ 35°/s | ≥ 80 ms or ≥ 0.16 g·s excess impulse; 100 ms maximum continuity gap |
+| Possible crash (impact) | acceleration magnitude ≥ 4.5 g and peak rotation ≥ 35°/s | ≥ 80 ms or ≥ 0.16 g·s excess impulse; 100 ms maximum continuity gap |
+| Possible crash (drastic slowing, calibrated) | smoothed forward acceleration ≤ -1.2 g, beyond what tyres can brake; release at -0.6 g | ≥ 120 ms; no fast tilt unless ≥ 2 g |
 | Swerve | ≥ 4 direction changes, rotation-axis SD ≥ 35°/s, acceleration-magnitude SD ≥ 0.18 g | ≥ 40 samples, ≤ 15% missing samples |
-| Hard braking | forward acceleration ≤ -0.45 g; release at -0.20 g | ≥ 400 ms and jerk ≥ 0.75 g/s |
+| Firm braking | smoothed forward acceleration ≤ -0.35 g; release at -0.15 g | ≥ 250 ms, jerk ≥ 1 g/s (about 10 m/s³), no fast tilt |
 | Rapid acceleration | forward acceleration ≥ 0.40 g; release at 0.18 g | ≥ 500 ms and jerk ≥ 0.60 g/s |
-| Harsh cornering | lateral acceleration ≥ 0.50 g and yaw ≥ 28°/s | ≥ 450 ms; release below 0.22 g or 10°/s |
+| Sharp turn | smoothed lateral acceleration ≥ 0.30 g and yaw ≥ 15°/s | ≥ 300 ms and ≥ 45° of heading in one direction, no fast tilt; release below 0.15 g or 6°/s |
 
-Detector-local crash, swerve, and maneuver cooldowns default to 10 seconds. The stricter global non-crash cooldown is 60 seconds. Every value remains constructor-configurable and provisional pending physical validation.
+For scale: a brisk 90° turn at 15 mph pulls about 0.4 g at 35°/s, and a gentle one stays under 0.25 g.
+
+Detector-local crash, swerve, and maneuver cooldowns default to 10 seconds. The global non-crash cooldown is 15 seconds (it was 60, which hid a turn whenever braking into it had just fired).
+
+In a development build, a live drive logs the smoothed extremes to Metro every 2 seconds, plus every candidate's evidence, for tuning against real drives:
+
+```
+[imu] fwd -0.42..0.08 g, lat 0.31 g, yaw 27°/s, tilt 4°/s, jerk 1.40 g/s (rest fwd -0.03, lat 0.01)
+[imu] harsh_corner_candidate {"durationMs":900,"peakAccelerationG":0.33,...,"headingChangeDeg":52}
+``` Every value remains constructor-configurable and provisional pending physical validation.
 
 ## Usage
 
@@ -77,7 +93,7 @@ Thresholds and resource limits are constructor-configurable through `PartialImuP
 
 ## Drive event gate and crash quiet mode
 
-Live IMU and location events both enter the same per-drive `DriveEventGate` before trip retention, coach-card updates, or `VoiceCoordinator`. The first possible crash is retained and spoken once, with `confirmed: false`, and starts a 15-minute quiet interval measured with an injected monotonic clock. During that interval all later automatic events—including secondary crash/maneuver candidates and location coaching—are rejected, so they cannot churn the warning card, enter the trip, or queue speech. GPS fixes, speed state, map/BLE work, elapsed timers, chat/user controls, and End drive continue normally.
+Live IMU and location events both enter the same per-drive `DriveEventGate` before trip retention, coach-card updates, or `VoiceCoordinator`. The first possible crash is retained and spoken once, with `confirmed: false`, and starts a 15-second quiet interval measured with an injected monotonic clock. During that interval all later automatic events—including secondary crash/maneuver candidates and location coaching—are rejected, so they cannot churn the warning card, enter the trip, or queue speech. GPS fixes, speed state, map/BLE work, elapsed timers, chat/user controls, and End drive continue normally.
 
 `DriveEventGate.snapshot()` reports whether quiet mode is active, its monotonic deadline/remaining time, admitted and suppressed totals, and suppression counts by app-wide event kind. The live hook also exposes the latest snapshot as `suppression`. A new drive creates a new gate; disposal drops the old router. On crash, `VoiceCoordinator` releases queued lower-priority automatic/chat streams, preempts lower-priority speech, and deduplicates the possible-crash check.
 

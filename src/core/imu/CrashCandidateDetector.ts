@@ -24,7 +24,12 @@ export class CrashCandidateDetector {
   private armed = true;
   private lastEventAtMs = Number.NEGATIVE_INFINITY;
 
-  constructor(private readonly config: CrashDetectorConfig) {}
+  constructor(private config: CrashDetectorConfig) {}
+
+  /** Swaps thresholds live, keeping in-flight state (episodes, cooldowns, learned resting level). */
+  setConfig(config: CrashDetectorConfig): void {
+    this.config = config;
+  }
 
   process(sample: ImuSample): ImuEvent | undefined {
     const accelerationG = accelerationMagnitude(sample);

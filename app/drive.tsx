@@ -16,6 +16,7 @@ import { useCoachChat, type CoachChatApi } from '@/features/driving-session/useC
 import { useDriveVoice } from '@/features/driving-session/useDriveVoice';
 import { useLiveImuDrive } from '@/features/driving-session/useLiveImuDrive';
 import { SpeedBadge } from '@/features/driving-session/SpeedBadge';
+import { TuningPanel } from '@/features/driving-session/TuningPanel';
 import { useLiveLocation, type LiveLocationStatus } from '@/features/driving-session/useLiveLocation';
 import { useReplayDrive } from '@/features/driving-session/useReplayDrive';
 import { POLICIES } from '@/features/voice/phrases';
@@ -63,6 +64,7 @@ export default function DriveRoute() {
   );
   const replay = useReplayDrive(replayMode, voice);
   const live = useLiveImuDrive(!replayMode, deviceId, voice);
+  const [tuneOpen, setTuneOpen] = useState(false);
   const location = useLiveLocation(!replayMode, live.eventSink);
   const getEvents = useCallback(
     () => (replayMode ? replay.eventsRef.current : live.eventsRef.current),
@@ -167,7 +169,11 @@ export default function DriveRoute() {
               <Text variant="bodySmall" style={styles.calibrationDetail}>{live.calibrationMessage}</Text>
             </View>
             <Button compact mode="text" onPress={() => void live.recalibrate()}>Recalibrate</Button>
+            <Button compact mode="contained-tonal" onPress={() => setTuneOpen(true)}>Tune</Button>
           </Surface>
+        ) : null}
+        {!replayMode ? (
+          <TuningPanel visible={tuneOpen} onDismiss={() => setTuneOpen(false)} motion={live.motion} />
         ) : null}
 
         <CoachChatBar chat={chat} />

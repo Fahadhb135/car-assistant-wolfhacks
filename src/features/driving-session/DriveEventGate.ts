@@ -1,7 +1,7 @@
 import type { DriveEvent, DriveEventKind } from '../../core/events/types';
 import type { VoiceCoordinator } from '../voice/VoiceCoordinator';
 
-export const CRASH_QUIET_INTERVAL_MS = 15 * 60 * 1_000;
+export const CRASH_QUIET_INTERVAL_MS = 15 * 1_000;
 
 export type DriveEventSuppressionReason = 'crash_quiet_interval';
 
