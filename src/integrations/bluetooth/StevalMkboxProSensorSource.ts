@@ -143,6 +143,12 @@ export class StevalMkboxProSensorSource implements SensorSource {
         (error) => this.handleMonitorError(error),
       );
 
+      // A drive that ended without stop_log (app reload, crash, lost connection) leaves the board
+      // logging, and DATALOG2 rejects start_log while a log is running. Stop any leftover log
+      // first; the board may reject this when nothing is running, which is fine.
+      for (const command of stopImuStreamCommands()) {
+        await this.sendCommand(command).catch(() => undefined);
+      }
       for (const command of startImuStreamCommands()) {
         await this.sendCommand(command);
         this.acceptedCommandCount++;
@@ -309,7 +315,9 @@ export class StevalMkboxProSensorSource implements SensorSource {
     } catch (cause) {
       this.rejectPendingResponse(cause instanceof Error ? cause : new Error(String(cause)));
       await response.catch(() => undefined);
-      throw cause;
+      // Name the command so a rejection on the drive screen says which setting the board refused.
+      const message = cause instanceof Error ? cause.message : String(cause);
+      throw message.includes(command) ? cause : new Error(`${message} Command: ${command}`);
     }
   }
 

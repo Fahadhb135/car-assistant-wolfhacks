@@ -38,7 +38,7 @@ class FakeBluetoothClient implements BluetoothClient {
   stopMonitoringCount = 0;
   respond = true;
   rejectCommandNumber: number | null = null;
-  private completedCommandCount = 0;
+  completedCommandCount = 0;
 
   async requestPermissions(): Promise<boolean> { return true; }
   async startScan(_onDevice: BluetoothScanListener, _onError: BluetoothErrorListener): Promise<void> {}
@@ -177,6 +177,26 @@ test('aborts rejected startup and performs best-effort cleanup', async () => {
   assert.equal(source.getDiagnostics().state, 'idle');
   assert.equal(client.stopMonitoringCount, 1);
   assert.equal(errors.length, 1);
+});
+
+test('stops a leftover log before starting, even if the board rejects that stop', async () => {
+  const client = new FakeBluetoothClient();
+  client.rejectCommandNumber = 1; // the pre-start stop_log: nothing was running
+  const source = new StevalMkboxProSensorSource(client, { writePacingMs: 0 });
+
+  await source.start(() => {}, () => {});
+  assert.equal(source.getDiagnostics().state, 'running');
+  assert.equal(source.getDiagnostics().acceptedCommandCount, 9);
+  assert.equal(client.completedCommandCount, 10, 'one stop_log, then the nine start commands');
+  await source.stop();
+});
+
+test('names the command the board rejected', async () => {
+  const client = new FakeBluetoothClient();
+  client.rejectCommandNumber = 10; // start_log, after the pre-start stop and eight settings
+  const source = new StevalMkboxProSensorSource(client, { writePacingMs: 0 });
+
+  await assert.rejects(source.start(() => {}, () => {}), /rejected a PnPL command.*start_log/i);
 });
 
 test('times out startup when the board does not acknowledge commands', async () => {
