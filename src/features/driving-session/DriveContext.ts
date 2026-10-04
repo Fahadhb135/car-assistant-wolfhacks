@@ -1,4 +1,5 @@
 import type { DriveEvent } from '../../core/events/types';
+import { distanceM } from '../../core/location/geo';
 import type { GpsFix } from '../../core/location/types';
 import type { CloudTrip, EventStamp } from '../../integrations/backend/tripUpload';
 
@@ -7,6 +8,10 @@ export type LivePosition = Readonly<{
   limitMps: number | null;
   road: string | null;
 }>;
+
+/** Hops shorter than this are GPS jitter while parked or creeping; longer ones are a lost signal, not driving. */
+const MIN_HOP_M = 5;
+const MAX_HOP_M = 1_000;
 
 /**
  * What one drive knows about where the car is, shared by the trip upload and live coaching:
@@ -17,9 +22,19 @@ export class DriveContext {
   private position: LivePosition | null = null;
   private readonly stamps = new Map<string, EventStamp>();
   private readonly said: CloudTrip['transcript'][number][] = [];
+  private travelledM = 0;
 
   updateFix(fix: GpsFix, limitMps: number | null = null, road: string | null = null): void {
+    if (this.position) {
+      const hop = distanceM(this.position.fix, fix);
+      if (hop >= MIN_HOP_M && hop <= MAX_HOP_M) this.travelledM += hop;
+    }
     this.position = { fix, limitMps, road };
+  }
+
+  /** How far the car has driven so far, summed from GPS fixes (metres). */
+  distanceM(): number {
+    return this.travelledM;
   }
 
   latest(): LivePosition | null {

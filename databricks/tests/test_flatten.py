@@ -21,6 +21,16 @@ def test_trip_row_summarises():
     assert t["smoothness"] == 82
 
 
+def test_trip_row_has_distance_and_counts_speeding_separately_from_bad_events():
+    trip = {**TRIP, "scores": {"smoothness": 82, "distanceM": 8046.7},
+            "events": TRIP["events"] + [{"eventId": "s", "t": 9, "kind": "speeding", "speedMps": 20, "limitMps": 13}]}
+    t = flatten_trip(trip)[0]
+    assert t["distanceM"] == 8046.7 and t["nSpeeding"] == 1
+    assert t["nBadEvents"] == 3  # unchanged: speeding is not a problem event here
+    old = flatten_trip(TRIP)[0]
+    assert old["distanceM"] is None and old["nSpeeding"] == 0
+
+
 def test_confirmed_crash_sets_trip_flag():
     confirmed = {**TRIP, "events": [{"eventId": "c", "t": 8, "kind": "crash", "confirmed": True}]}
     assert flatten_trip(confirmed)[0]["hadCrash"] is True

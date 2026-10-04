@@ -56,3 +56,15 @@ def test_privacy_rule_hides_single_driver_stops_and_shows_crowd_ones(story):
     assert all(h["drivers"] >= 2 and h["demo"] for h in hot)
     lats = sorted(h["lat"] for h in hot)
     assert abs(lats[0] - STOPS["B"][0]) < 0.0004 and abs(lats[1] - STOPS["C"][0]) < 0.0004
+
+
+def test_maya_has_distance_and_speeds_less_over_time_for_the_parent_dashboard(story):
+    from app import parent
+
+    trips, events = parent.rows_from_payloads(story)
+    maya = parent.driver_history(trips, events)["demo-maya"]
+    assert all(t["distanceM"] and 6_500 <= t["distanceM"] <= 14_000 for t in maya["trips"])
+    counts = [t["speedingCount"] for t in maya["trips"]]
+    assert sum(counts[:3]) > sum(counts[-3:]) and counts[-1] == 0
+    assert all(s["overByMph"] and 5 <= s["overByMph"] <= 15.5 for s in maya["speeding"])  # speeding alerts start at 5 mph over
+    assert all(s["lat"] and s["lon"] for s in maya["speeding"])  # so location sharing has something to show

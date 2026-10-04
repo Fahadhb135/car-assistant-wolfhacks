@@ -98,12 +98,18 @@ export function buildCloudTrip(options: Readonly<{
   events: readonly DriveEvent[];
   stampFor?: (eventId: string) => EventStamp | undefined;
   transcript?: CloudTrip['transcript'];
+  /** How far the car drove (metres, from GPS). Left out when there was no GPS, so it reads as "not recorded", not 0. */
+  distanceM?: number;
 }>): CloudTrip {
-  const { stampFor, transcript, ...trip } = options;
+  const { stampFor, transcript, distanceM, ...trip } = options;
   const compliance = stopCompliance(options.events);
   return {
     ...trip,
-    scores: { smoothness: smoothnessScore(options.events), ...(compliance !== null ? { stopCompliance: compliance } : {}) },
+    scores: {
+      smoothness: smoothnessScore(options.events),
+      ...(compliance !== null ? { stopCompliance: compliance } : {}),
+      ...(distanceM !== undefined && distanceM > 0 ? { distanceM: Math.round(distanceM) } : {}),
+    },
     events: cloudEvents(options.events, stampFor),
     features: [],
     transcript: transcript ?? [],
