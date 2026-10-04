@@ -301,6 +301,10 @@ export class StevalMkboxProSensorSource implements SensorSource {
       }, this.commandTimeoutMs);
       this.pendingResponse = { resolve, reject, timer };
     });
+    // The timeout can fire while the writes below are still stalled on a dropped link, before
+    // anything awaits `response`; mark it observed so that isn't reported as an uncaught rejection.
+    // The rejection still reaches the `await response` / catch below.
+    response.catch(() => undefined);
 
     try {
       for (const packet of frameStPnplCommand(command)) {
