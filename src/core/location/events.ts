@@ -27,4 +27,13 @@ export type HighwayEvent = Base & {
   road?: string;
 };
 
-export type LocationEvent = FeatureAheadEvent | HighwayEvent;
+export type StopComplianceEvent = Base & {
+  /** How the driver handled a stop sign the coach announced, judged once the car passed it. */
+  kind: 'stop_ok' | 'rolling_stop' | 'ran_stop';
+  severity: 'info' | 'warn';
+  featureId: number;
+  /** Slowest GPS speed near the sign, m/s. */
+  minSpeedMps: number;
+};
+
+export type LocationEvent = FeatureAheadEvent | HighwayEvent | StopComplianceEvent;
