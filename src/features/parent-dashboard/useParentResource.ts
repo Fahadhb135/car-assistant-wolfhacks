@@ -1,22 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ParentResult, ParentSession } from '../../integrations/backend/parentClient';
+import { getDriverId } from '../driving-session/driverId';
 import { loadWithFallback, type Loaded, type ResourceCache } from './loadWithFallback';
-import { clearParentSession, getParentSession } from './parentSession';
 
 /** One cache for the whole app session: the last good response per screen, for when the connection drops. */
 const cache: ResourceCache = new Map();
 
-export function currentParentSession(): ParentSession | null {
-  const stored = getParentSession();
+/** This phone's own driver and the cloud service, or null when the service URL is not configured. */
+export function currentSession(): ParentSession | null {
   const baseUrl = process.env.EXPO_PUBLIC_API_URL;
-  return stored && baseUrl ? { baseUrl, token: stored.token } : null;
+  return baseUrl ? { baseUrl, driverId: getDriverId() } : null;
 }
 
-/**
- * Loads one parent resource and keeps it fresh on demand (`reload`). A 401 means the driver revoked
- * access, so the saved link is dropped and the screen sends the parent back to the link screen.
- */
+/** Loads one dashboard resource and refreshes it on demand (`reload`). */
 export function useParentResource<T>(
   key: string,
   fetcher: (session: ParentSession) => Promise<ParentResult<T>>,
@@ -29,16 +26,15 @@ export function useParentResource<T>(
 
   const reload = useCallback(() => {
     const run = ++latest.current;
-    const session = currentParentSession();
+    const session = currentSession();
     setLoading(true);
     if (!session) {
-      setState({ status: 'error', failure: process.env.EXPO_PUBLIC_API_URL ? 'unauthorized' : 'offline' });
+      setState({ status: 'error', failure: 'offline' });
       setLoading(false);
       return;
     }
     void loadWithFallback(cache, key, () => fetcherRef.current(session)).then((next) => {
       if (run !== latest.current) return; // a newer request (e.g. another range) already took over
-      if (next.status === 'error' && next.failure === 'unauthorized') clearParentSession();
       setState(next);
       setLoading(false);
     });

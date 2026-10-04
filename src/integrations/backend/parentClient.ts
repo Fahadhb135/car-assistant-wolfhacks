@@ -102,7 +102,7 @@ export type SpeedingReport = Freshness & Readonly<{
   events: readonly SpeedingEvent[];
 }>;
 
-export type ParentFailure = 'unauthorized' | 'not-found' | 'invalid-code' | 'rate-limited' | 'offline' | 'bad-response';
+export type ParentFailure = 'not-found' | 'offline' | 'bad-response';
 export type ParentResult<T> = { ok: true; data: T } | { ok: false; reason: ParentFailure };
 
 type Rec = Record<string, unknown>;
@@ -256,31 +256,19 @@ export function parseSpeeding(json: unknown): SpeedingReport | null {
   };
 }
 
-export type ParentSession = Readonly<{ baseUrl: string; token: string; fetchImpl?: typeof fetch; timeoutMs?: number }>;
+/** Whose dashboard to show: this phone's own anonymous driver id (the same one trips are uploaded under). */
+export type ParentSession = Readonly<{ baseUrl: string; driverId: string; fetchImpl?: typeof fetch; timeoutMs?: number }>;
 
-async function call<T>(
-  o: Readonly<{ baseUrl: string; token?: string; fetchImpl?: typeof fetch; timeoutMs?: number }>,
-  path: string,
-  parse: (json: unknown) => T | null,
-  init: Readonly<{ method?: string; body?: unknown }> = {},
-): Promise<ParentResult<T>> {
+async function call<T>(s: ParentSession, path: string, parse: (json: unknown) => T | null): Promise<ParentResult<T>> {
   let res: Response;
   try {
-    res = await (o.fetchImpl ?? fetch)(`${o.baseUrl.replace(/\/$/, '')}${path}`, {
-      method: init.method ?? 'GET',
-      headers: {
-        ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(o.token ? { Authorization: `Bearer ${o.token}` } : {}),
-      },
-      ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
-      signal: AbortSignal.timeout(o.timeoutMs ?? 8_000),
+    res = await (s.fetchImpl ?? fetch)(`${s.baseUrl.replace(/\/$/, '')}/drivers/${encodeURIComponent(s.driverId)}${path}`, {
+      signal: AbortSignal.timeout(s.timeoutMs ?? 8_000),
     });
   } catch {
     return { ok: false, reason: 'offline' };
   }
-  if (res.status === 401) return { ok: false, reason: 'unauthorized' };
-  if (res.status === 429) return { ok: false, reason: 'rate-limited' };
-  if (res.status === 404) return { ok: false, reason: path === '/parent/link' ? 'invalid-code' : 'not-found' };
+  if (res.status === 404) return { ok: false, reason: 'not-found' };
   if (!res.ok) return { ok: false, reason: 'bad-response' };
   try {
     const data = parse(await res.json());
@@ -290,34 +278,10 @@ async function call<T>(
   }
 }
 
-/** Trade the driver's 6-digit code for a viewer token (shown to the parent once, kept on their phone). */
-export function linkWithCode(o: Readonly<{ baseUrl: string; code: string; fetchImpl?: typeof fetch }>) {
-  return call(o, '/parent/link', (j) => {
-    const token = isRec(j) ? str(j.viewerToken) : null;
-    return token && isRec(j) ? { token, driverId: str(j.driverId) ?? '', shareLocation: j.shareLocation === true } : null;
-  }, { method: 'POST', body: { code: o.code } });
-}
-
-export const fetchSummary = (s: ParentSession, r: ParentRange) => call(s, `/parent/summary?range=${r}`, parseSummary);
-export const fetchTrends = (s: ParentSession, r: ParentRange) => call(s, `/parent/trends?range=${r}`, parseTrends);
-export const fetchSpeeding = (s: ParentSession, r: ParentRange) => call(s, `/parent/speeding?range=${r}`, parseSpeeding);
-export const fetchTrip = (s: ParentSession, tripId: string) => call(s, `/parent/trips/${encodeURIComponent(tripId)}`, parseTripDetail);
+export const fetchSummary = (s: ParentSession, r: ParentRange) => call(s, `/summary?range=${r}`, parseSummary);
+export const fetchTrends = (s: ParentSession, r: ParentRange) => call(s, `/trends?range=${r}`, parseTrends);
+export const fetchSpeeding = (s: ParentSession, r: ParentRange) => call(s, `/speeding?range=${r}`, parseSpeeding);
+export const fetchTrip = (s: ParentSession, tripId: string) => call(s, `/trips/${encodeURIComponent(tripId)}`, parseTripDetail);
 export const fetchTrips = (s: ParentSession, o: Readonly<{ limit?: number; before?: number | null }> = {}) =>
-  call(s, `/parent/trips?limit=${o.limit ?? 20}${o.before ? `&before=${o.before}` : ''}`, parseTripPage);
+  call(s, `/trips?limit=${o.limit ?? 20}${o.before ? `&before=${o.before}` : ''}`, parseTripPage);
 
-/** Driver side: a code to show a parent. Location stays hidden from them unless `shareLocation` is true. */
-export function createShareCode(o: Readonly<{ baseUrl: string; driverId: string; shareLocation: boolean; fetchImpl?: typeof fetch }>) {
-  return call(o, `/drivers/${encodeURIComponent(o.driverId)}/share-code`, (j) => {
-    const code = isRec(j) ? str(j.code) : null;
-    const expiresAt = isRec(j) ? num(j.expiresAt) : null;
-    return code && expiresAt !== null ? { code, expiresAt } : null;
-  }, { method: 'POST', body: { shareLocation: o.shareLocation } });
-}
-
-/** Driver side: cut off every linked parent (and any code not yet used). */
-export function revokeParents(o: Readonly<{ baseUrl: string; driverId: string; fetchImpl?: typeof fetch }>) {
-  return call(o, `/drivers/${encodeURIComponent(o.driverId)}/viewers`, (j) => {
-    const revoked = isRec(j) ? num(j.revoked) : null;
-    return revoked === null ? null : { revoked };
-  }, { method: 'DELETE' });
-}

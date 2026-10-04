@@ -72,9 +72,6 @@ export default function ParentTripRoute() {
                         <View style={{ flex: 1, gap: 2 }}>
                           <Text variant="titleMedium">{issueLabel(e.kind)}</Text>
                           {eventDetail(e) ? <Text variant="bodySmall" style={s.muted}>{eventDetail(e)}</Text> : null}
-                          {e.lat !== undefined && e.lon !== undefined ? (
-                            <Text variant="bodySmall" style={s.muted}>{e.lat.toFixed(4)}, {e.lon.toFixed(4)}</Text>
-                          ) : null}
                         </View>
                       </View>
                       {i < d.events.length - 1 ? <Divider /> : null}

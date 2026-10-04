@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -27,25 +27,7 @@ LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 
 CLOUD_DIR = Path(__file__).resolve().parent.parent  # defaults live under cloud/ however we're launched
 COACHING_TTL_S = 600  # re-read Databricks' coaching context at most this often
-PARENT_TTL_S = 600  # same for the parent dashboard snapshot
-SHARE_CODE_TTL_MS = 10 * 60_000
-LINK_ATTEMPTS = 10  # wrong share codes allowed per client per window, so a 6-digit code cannot be guessed
-LINK_WINDOW_S = 600
-
-
-class ShareCodeRequest(BaseModel):
-    shareLocation: bool = False
-
-
-class LinkRequest(BaseModel):
-    code: str = Field(pattern=r"^\d{6}$")
-
-
-class Viewer(BaseModel):
-    driverId: str
-    shareLocation: bool
-
-
+PARENT_TTL_S = 600  # same for the dashboard snapshot
 
 
 def create_app(
@@ -229,10 +211,9 @@ def create_app(
         store.save_hotspots(snap.model_dump())
         return {"source": snap.source, "count": len(snap.hotspots), "demo": snap.demo}
 
-    # --- Parent dashboard. Aggregates come from Databricks (cached snapshot); the local trips fill in
+    # --- Driver dashboard. Aggregates come from Databricks (cached snapshot); the local trips fill in
     # anything it has not processed yet, so the list is current the moment a drive is uploaded.
     parent_cache: dict = {"value": None, "loaded_at": 0.0}
-    link_failures: dict[str, list[float]] = {}
 
     def parent_histories(force: bool = False) -> tuple[str, Optional[int], dict[str, dict]]:
         now = time.time()
@@ -249,79 +230,48 @@ def create_app(
             return "local", None, {}
         return "databricks", cached["generatedAt"], cached["drivers"]
 
-    def driver_view(viewer: Viewer) -> tuple[dict, str, Optional[int]]:
+    def driver_view(driver_id: str) -> tuple[dict, str, Optional[int]]:
         """(history, source, generatedAt) for one driver: Databricks' rows plus any newer local trips."""
-        local = parent_data.driver_history(*parent_data.rows_from_payloads(store.trips_for_driver(viewer.driverId)))
+        local = parent_data.driver_history(*parent_data.rows_from_payloads(store.trips_for_driver(driver_id)))
         source, generated, remote = parent_histories()
         empty = {"trips": [], "speeding": []}
-        merged = parent_data.merge_histories({viewer.driverId: remote.get(viewer.driverId, empty)},
-                                             {viewer.driverId: local.get(viewer.driverId, empty)})
-        return merged[viewer.driverId], source, generated
+        merged = parent_data.merge_histories({driver_id: remote.get(driver_id, empty)},
+                                             {driver_id: local.get(driver_id, empty)})
+        return merged[driver_id], source, generated
 
-    def current_viewer(authorization: Optional[str] = Header(default=None)) -> Viewer:
-        scheme, _, token = (authorization or "").partition(" ")
-        found = store.get_viewer(token) if scheme.lower() == "bearer" and token else None
-        if found is None:
-            raise HTTPException(401, "link this phone to a driver first")
-        return Viewer(driverId=found[0], shareLocation=found[1])
-
-    def parent_response(viewer: Viewer, body: dict, source: str, generated: Optional[int]) -> dict:
+    def dashboard_response(body: dict, source: str, generated: Optional[int]) -> dict:
+        """Adds where the numbers came from and how old they are. GPS positions are never included."""
         body = {**body, "source": source, "generatedAt": generated or int(time.time() * 1000)}
-        return body if viewer.shareLocation else parent_data.strip_location(body)
+        return parent_data.strip_location(body)
 
     def check_range(range_: str) -> str:
         if range_ not in parent_data.RANGES:
             raise HTTPException(422, "range must be 7d, 30d or all")
         return range_
 
-    @app.post("/drivers/{driver_id}/share-code")
-    def create_share_code(driver_id: str, req: ShareCodeRequest) -> dict:
-        """The driver shows this code to a parent (10 minutes, one use). Location stays hidden from the
-        parent unless the driver turns it on here."""
-        code, expires = store.create_share_code(driver_id, req.shareLocation, int(time.time() * 1000), SHARE_CODE_TTL_MS)
-        return {"code": code, "expiresAt": expires, "shareLocation": req.shareLocation}
-
-    @app.post("/parent/link")
-    def parent_link(req: LinkRequest, request: Request) -> dict:
-        host = request.client.host if request.client else "?"
-        now = time.time()
-        recent = [t for t in link_failures.get(host, []) if now - t < LINK_WINDOW_S]
-        if len(recent) >= LINK_ATTEMPTS:
-            raise HTTPException(429, "too many wrong codes, try again in a few minutes")
-        redeemed = store.redeem_share_code(req.code, int(now * 1000))
-        if redeemed is None:
-            link_failures[host] = recent + [now]
-            raise HTTPException(404, "that code is wrong or has expired")
-        driver_id, share_location = redeemed
-        token = store.add_viewer(driver_id, share_location, int(now * 1000))
-        return {"viewerToken": token, "driverId": driver_id, "shareLocation": share_location}
-
-    @app.delete("/drivers/{driver_id}/viewers")
-    def revoke_viewers(driver_id: str) -> dict:
-        return {"revoked": store.revoke_viewers(driver_id)}
-
-    @app.get("/parent/summary")
-    def parent_summary(range: str = "30d", viewer: Viewer = Depends(current_viewer)) -> dict:
-        history, source, generated = driver_view(viewer)
+    @app.get("/drivers/{driver_id}/summary")
+    def dashboard_summary(driver_id: str, range: str = "30d") -> dict:
+        history, source, generated = driver_view(driver_id)
         body = parent_data.summary(history, check_range(range), int(time.time() * 1000))
-        return parent_response(viewer, body, source, generated)
+        return dashboard_response(body, source, generated)
 
-    @app.get("/parent/trends")
-    def parent_trends(range: str = "30d", viewer: Viewer = Depends(current_viewer)) -> dict:
-        history, source, generated = driver_view(viewer)
+    @app.get("/drivers/{driver_id}/trends")
+    def dashboard_trends(driver_id: str, range: str = "30d") -> dict:
+        history, source, generated = driver_view(driver_id)
         points = parent_data.trends(history, check_range(range), int(time.time() * 1000))
-        return parent_response(viewer, {"range": range, "points": points}, source, generated)
+        return dashboard_response({"range": range, "points": points}, source, generated)
 
-    @app.get("/parent/trips")
-    def parent_trips(limit: int = 20, before: Optional[int] = None, viewer: Viewer = Depends(current_viewer)) -> dict:
-        history, source, generated = driver_view(viewer)
+    @app.get("/drivers/{driver_id}/trips")
+    def dashboard_trips(driver_id: str, limit: int = 20, before: Optional[int] = None) -> dict:
+        """Past drives, newest first. `limit=1` is the home screen's "Last drive"."""
+        history, source, generated = driver_view(driver_id)
         body = parent_data.trip_page(history, max(1, min(limit, 100)), before)
-        return parent_response(viewer, body, source, generated)
+        return dashboard_response(body, source, generated)
 
-    @app.get("/parent/trips/{trip_id}")
-    def parent_trip(trip_id: str, viewer: Viewer = Depends(current_viewer)) -> dict:
+    @app.get("/drivers/{driver_id}/trips/{trip_id}")
+    def dashboard_trip(driver_id: str, trip_id: str) -> dict:
         trip = store.get_trip(trip_id)
-        if trip is None or trip.driverId != viewer.driverId:  # someone else's trip looks the same as none
+        if trip is None or trip.driverId != driver_id:  # someone else's trip looks the same as none
             raise HTTPException(404, "unknown trip")
         report = store.get_report(trip_id)
         if report is None:
@@ -342,15 +292,15 @@ def create_app(
             ],
             "report": report.model_dump(),
         }
-        return parent_response(viewer, body, "local", None)
+        return dashboard_response(body, "local", None)
 
-    @app.get("/parent/speeding")
-    def parent_speeding(range: str = "30d", viewer: Viewer = Depends(current_viewer)) -> dict:
-        history, source, generated = driver_view(viewer)
+    @app.get("/drivers/{driver_id}/speeding")
+    def dashboard_speeding(driver_id: str, range: str = "30d") -> dict:
+        history, source, generated = driver_view(driver_id)
         body = parent_data.speeding_report(history, check_range(range), int(time.time() * 1000))
-        return parent_response(viewer, body, source, generated)
+        return dashboard_response(body, source, generated)
 
-    @app.post("/admin/parent/refresh")
+    @app.post("/admin/dashboard/refresh")
     def refresh_parent(request: Request, x_admin_token: Optional[str] = Header(default=None)) -> dict:
         """Re-read the dashboard snapshot Databricks published, e.g. right after 02_analytics ran."""
         check_admin(request, x_admin_token)
