@@ -40,6 +40,8 @@ export default function TripSummaryRoute() {
 
   const events = stored
     ? stored.trip.events.map((event) => ({
+        // Several events can land in the same second, so the time alone is not a unique key.
+        key: event.eventId,
         time: formatEventTime(event.t - stored.trip.start),
         title: event.kind === 'crash'
           ? 'Possible crash'
@@ -53,7 +55,7 @@ export default function TripSummaryRoute() {
         detail: event.kind === 'crash' ? 'Safety check requested' : 'Experimental motion candidate',
         tone: 'warn',
       }))
-    : demoEvents;
+    : demoEvents.map((event) => ({ ...event, key: event.time }));
   const score = stored?.trip.scores.smoothness ?? 88;
   const displayedMetrics = stored
     ? [
@@ -139,7 +141,7 @@ export default function TripSummaryRoute() {
         <Card style={styles.timelineCard} mode="contained">
           <Card.Content style={styles.timelineContent}>
             {events.map((event, index) => (
-              <View key={event.time}>
+              <View key={event.key}>
                 <View style={styles.eventRow}>
                   <Text variant="labelLarge" style={styles.eventTime}>{event.time}</Text>
                   <View style={[styles.eventDot, event.tone === 'warn' && styles.eventDotWarn]} />
