@@ -21,6 +21,9 @@ export const POLICIES: Record<AlertKind, AlertPolicy> = {
   // Below stop signs and highway merges, above traffic lights; SpeedingCoach has its own cooldown.
   speeding: { priority: 57, ttlMs: 4_000, cooldownMs: 15_000 },
   erratic_driving: { priority: 50, ttlMs: 5_000, cooldownMs: 20_000 },
+  hard_braking: { priority: 48, ttlMs: 5_000, cooldownMs: 20_000 },
+  rapid_acceleration: { priority: 46, ttlMs: 5_000, cooldownMs: 20_000 },
+  harsh_cornering: { priority: 46, ttlMs: 5_000, cooldownMs: 20_000 },
   stop_ok: { priority: 20, ttlMs: 4_000, cooldownMs: 15_000 },
   chat_reply: { priority: 30, ttlMs: 15_000, cooldownMs: 0 },
   coaching_tip: { priority: 10, ttlMs: 30_000, cooldownMs: 60_000 },
@@ -65,6 +68,10 @@ function phraseFor(event: DriveEvent): PhraseId | null {
       return 'rolling_stop';
     case 'erratic_driving':
       return 'erratic_driving';
+    case 'hard_braking':
+    case 'rapid_acceleration':
+    case 'harsh_cornering':
+      return null;
     case 'stop_ok':
       return 'stop_ok';
     case 'traffic_light_ahead':
@@ -85,19 +92,28 @@ function phraseFor(event: DriveEvent): PhraseId | null {
 }
 
 export function alertFromEvent(event: DriveEvent): Alert | null {
+  const dynamicText = event.kind === 'hard_braking'
+    ? 'Brake more smoothly and leave extra space ahead.'
+    : event.kind === 'rapid_acceleration'
+      ? 'Ease onto the accelerator for a smoother start.'
+      : event.kind === 'harsh_cornering'
+        ? 'Slow down before the turn and steer smoothly.'
+        : undefined;
   const phraseId = phraseFor(event);
-  if (!phraseId) return null;
+  if (!dynamicText && !phraseId) return null;
   const policy = POLICIES[event.kind];
   // No bundled clip for these yet, so they use device TTS (see PHRASES_WITHOUT_AUDIO).
-  const bundledPhraseId =
-    (event.kind === 'crash' && !event.confirmed) || PHRASES_WITHOUT_AUDIO.has(phraseId) ? undefined : phraseId;
+  const bundledPhraseId = !phraseId
+    || (event.kind === 'crash' && !event.confirmed)
+    || PHRASES_WITHOUT_AUDIO.has(phraseId)
+    ? undefined
+    : phraseId;
   return {
     id: event.eventId,
     kind: event.kind,
     priority: policy.priority,
-    // The existing crash_check asset says "Crash detected". An unconfirmed heuristic candidate uses
-    // device TTS instead, so it is accurately presented as a possible crash.
-    utterance: { text: PHRASES[phraseId], phraseId: bundledPhraseId },
+    // New experimental behaviors and unconfirmed crashes use device TTS rather than stale assets.
+    utterance: { text: dynamicText ?? PHRASES[phraseId!], phraseId: bundledPhraseId },
     createdAt: event.t,
     ttlMs: policy.ttlMs,
   };

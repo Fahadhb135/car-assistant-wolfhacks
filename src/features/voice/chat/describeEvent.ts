@@ -16,6 +16,12 @@ export function describeEvent(e: DriveEvent): string {
       return e.confirmed ? 'A crash was confirmed.' : 'A possible crash was detected.';
     case 'erratic_driving':
       return `Erratic driving was flagged (score ${e.score.toFixed(2)}).`;
+    case 'hard_braking':
+      return `A firm-braking candidate was flagged (score ${e.score.toFixed(2)}).`;
+    case 'rapid_acceleration':
+      return `A rapid-acceleration candidate was flagged (score ${e.score.toFixed(2)}).`;
+    case 'harsh_cornering':
+      return `A sharp-corner candidate was flagged (score ${e.score.toFixed(2)}).`;
     case 'stop_sign_ahead':
       return `A stop sign was ahead (${Math.round(e.distanceM)} m).`;
     case 'stop_ok':

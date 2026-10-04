@@ -56,6 +56,22 @@ def test_unconfirmed_crash_stays_qualified_in_report(make):
     assert "possible crash" in issue["advice"].lower()
 
 
+def test_behavior_candidate_evidence_reaches_report(make):
+    trip = {
+        **TRIP,
+        "tripId": "hard-brake",
+        "events": [{
+            "eventId": "b1", "t": 5, "kind": "hard_braking", "score": 0.8,
+            "evidence": {"durationMs": 300, "peakAccelerationG": 0.5},
+        }],
+    }
+    c = make()
+    assert c.post("/trips", json=trip).status_code == 201
+    report = c.get("/trips/hard-brake/report").json()
+    assert report["topIssues"][0]["eventRef"] == "b1"
+    assert "braking" in report["topIssues"][0]["advice"].lower()
+
+
 def test_gemini_report_drops_hallucinated_event_refs(make):
     fake = lambda prompt: json.dumps(
         {

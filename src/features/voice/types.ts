@@ -9,6 +9,9 @@ export type AlertKind =
   | 'traffic_light_ahead'
   | 'rolling_stop'
   | 'erratic_driving'
+  | 'hard_braking'
+  | 'rapid_acceleration'
+  | 'harsh_cornering'
   | 'stop_ok'
   | 'chat_reply'
   | 'coaching_tip';

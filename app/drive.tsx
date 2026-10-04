@@ -74,7 +74,9 @@ export default function DriveRoute() {
   const sensorValue = replayMode
     ? 'Replay'
     : live.status === 'running'
-      ? deviceName ?? 'Connected'
+      ? live.calibrationStatus === 'ready'
+        ? deviceName ?? 'Connected'
+        : 'Calibrating…'
       : live.status === 'error'
         ? 'Error'
         : live.status === 'connecting' || live.status === 'starting'
@@ -154,6 +156,18 @@ export default function DriveRoute() {
           <Text variant="bodySmall" style={styles.sensorError}>
             Location is off, so stop sign, traffic light and highway coaching is unavailable. Allow location for Car Assistant in Settings.
           </Text>
+        ) : null}
+
+        {!replayMode && live.status === 'running' ? (
+          <Surface style={styles.calibrationCard} elevation={0}>
+            <View style={styles.calibrationCopy}>
+              <Text variant="labelLarge" style={styles.calibrationLabel}>
+                {live.calibrationStatus === 'ready' ? 'SENSOR CALIBRATED' : 'SENSOR CALIBRATION'}
+              </Text>
+              <Text variant="bodySmall" style={styles.calibrationDetail}>{live.calibrationMessage}</Text>
+            </View>
+            <Button compact mode="text" onPress={() => void live.recalibrate()}>Recalibrate</Button>
+          </Surface>
         ) : null}
 
         <CoachChatBar chat={chat} />
@@ -249,4 +263,8 @@ const styles = StyleSheet.create({
   endButtonContent: { height: 50 },
   safetyNote: { color: '#789081', lineHeight: 17, paddingHorizontal: 18, textAlign: 'center' },
   sensorError: { backgroundColor: '#F6D5D5', borderRadius: 10, color: '#7A2020', padding: 10 },
+  calibrationCard: { alignItems: 'center', backgroundColor: '#173A2A', borderRadius: 14, flexDirection: 'row', gap: 10, padding: 12 },
+  calibrationCopy: { flex: 1, gap: 2 },
+  calibrationLabel: { color: '#A8DDBD', fontWeight: '800', letterSpacing: 0.8 },
+  calibrationDetail: { color: '#D8E2DC', lineHeight: 18 },
 });

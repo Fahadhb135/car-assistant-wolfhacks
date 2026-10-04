@@ -22,10 +22,13 @@ spark.sql(f"""CREATE TABLE IF NOT EXISTS {CAT}.{SCH}.trips (
   smoothness DOUBLE, stopCompliance DOUBLE, nEvents INT, nBadEvents INT, hadCrash BOOLEAN)""")
 spark.sql(f"""CREATE TABLE IF NOT EXISTS {CAT}.{SCH}.events (
   tripId STRING, driverId STRING, eventId STRING, tMs BIGINT, kind STRING, isBad BOOLEAN,
-  lat DOUBLE, lon DOUBLE, score DOUBLE, confirmed BOOLEAN, gridCell STRING)""")
-# CREATE TABLE IF NOT EXISTS does not evolve workspaces deployed before candidate confirmation was stored.
-if "confirmed" not in spark.table(f"{CAT}.{SCH}.events").columns:
+  lat DOUBLE, lon DOUBLE, score DOUBLE, confirmed BOOLEAN, evidenceJson STRING, gridCell STRING)""")
+# CREATE TABLE IF NOT EXISTS does not evolve existing workspaces.
+event_columns = spark.table(f"{CAT}.{SCH}.events").columns
+if "confirmed" not in event_columns:
     spark.sql(f"ALTER TABLE {CAT}.{SCH}.events ADD COLUMNS (confirmed BOOLEAN)")
+if "evidenceJson" not in event_columns:
+    spark.sql(f"ALTER TABLE {CAT}.{SCH}.events ADD COLUMNS (evidenceJson STRING)")
 spark.sql(f"""CREATE TABLE IF NOT EXISTS {CAT}.{SCH}.features (
   tripId STRING, driverId STRING, windowIdx INT, features ARRAY<DOUBLE>)""")
 

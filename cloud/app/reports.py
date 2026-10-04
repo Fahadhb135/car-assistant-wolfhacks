@@ -9,12 +9,17 @@ from .schemas import Issue, Report, Trip, TripEvent
 # (trip_json, schema_class) -> Report JSON string. Injected so tests need no network.
 GeminiFn = Callable[[str], Optional[str]]
 
-BAD_KINDS = {"crash", "ran_stop", "rolling_stop", "erratic_driving"}
+BAD_KINDS = {
+    "crash", "ran_stop", "rolling_stop", "erratic_driving",
+    "hard_braking", "rapid_acceleration", "harsh_cornering",
+}
 
 PROMPT = """You are a supportive driving coach for new drivers. Write a short trip report.
 Rules: only reference eventRef values that appear in the events list. A crash event with
 confirmed=false is only a possible motion-sensor candidate; never state that a crash occurred.
-Never give safety instructions or claim to detect intoxication. Be specific, kind and concise.
+Hard-braking, rapid-acceleration, harsh-cornering, and erratic-driving events are also experimental
+motion candidates, not confirmed violations. Never claim to detect intoxication. Be specific,
+kind and concise.
 
 Trip:
 """
@@ -48,7 +53,10 @@ def _advice(event: TripEvent) -> str:
     return {
         "ran_stop": "Run-through at a stop sign. Start slowing down earlier.",
         "rolling_stop": "Rolling stop. Come to a full stop and count one second.",
-        "erratic_driving": "Unsteady driving detected. Keep both hands on the wheel and look further ahead.",
+        "erratic_driving": "Unsteady driving was flagged. Keep both hands on the wheel and look further ahead.",
+        "hard_braking": "Firm braking was flagged. Leave more space and begin braking earlier.",
+        "rapid_acceleration": "Quick acceleration was flagged. Ease onto the accelerator.",
+        "harsh_cornering": "A sharp corner was flagged. Slow before the turn and steer smoothly.",
     }[event.kind]
 
 
