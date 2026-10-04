@@ -6,7 +6,7 @@ An AI driving coach built on the **STMicroelectronics SensorTile.box**. A dash-m
 
 Track: **Applied AI Hardware+**. Collect, analyze and act on real sensor data; detect patterns/anomalies; deploy ML to edge/IoT devices.
 
-> Status: the Expo app can select a STEVAL-MKBOXPRO, decode its DATALOG2 v3.4 accelerometer/gyroscope stream, run the pure-TypeScript IMU pipeline, and route experimental crash/swerve candidates into the live drive event, voice, UI, and trip paths. Thresholds and provisional scale factors still require physical validation (see [the IMU pipeline guide](docs/imu-pipeline.md)). Ending a drive keeps a retryable in-app trip and posts it to the FastAPI service, which starts Gemini report generation and Databricks synchronization. The location modules, voice alert queue, bundled ElevenLabs audio, streamed push-to-talk Gemini chat, crowd hotspots, cloud service, and Databricks pipeline are implemented; replay mode runs the coaching and voice path offline on a bundled route.
+> Status: the Expo app can select a STEVAL-MKBOXPRO, decode its DATALOG2 v3.4 accelerometer/gyroscope stream, run the pure-TypeScript IMU pipeline, and route experimental crash/swerve candidates into the live drive event, voice, UI, and trip paths. Thresholds and provisional scale factors still require physical validation (see [the IMU pipeline guide](docs/imu-pipeline.md)). Ending a drive keeps a retryable in-app trip and posts it to the FastAPI service, which starts Gemini report generation and Databricks synchronization. Live drives also run GPS location coaching (stop signs, traffic lights, highway entry/exit from OpenStreetMap; foreground only). The location modules, voice alert queue, bundled ElevenLabs audio, streamed push-to-talk Gemini chat, crowd hotspots, cloud service, and Databricks pipeline are implemented; replay mode runs the coaching and voice path offline on a bundled route.
 
 ---
 
@@ -202,6 +202,17 @@ Both detectors run on the phone, with no server in the loop. The model is traine
 3. **Cache** (`src/integrations/location/tileCache.ts`), in order: memory, then persistent store, then Overpass, then a stale stored copy, then bundled demo-route tiles. Stored tiles carry a schema version so tiles from an older build are refetched rather than misread.
 4. **Prefetch:** when the point 25% of a tile ahead along the heading falls in another tile, fetch that tile. The tiles under the look-ahead cone are loaded too, since a sign 150 m ahead can sit across a tile border.
 5. **The live path never waits on the network:** call `cache.update(fix)` on every fix without awaiting it, then read `cache.featuresAhead(fix)` and `cache.roadsNear(fix)` synchronously and pass them to `LocationCoach.update(fix, ahead, roads)` (`src/core/location/coach.ts`).
+
+**Live drives** (`src/features/driving-session/useLiveLocation.ts`):
+- The drive screen watches the phone's GPS with `expo-location` at about 1 Hz (best-for-navigation accuracy) and feeds each fix to a `DriveSession` built by `createLiveLocationSession.ts`.
+- That session is the same one replay uses, with the real `OverpassClient` instead of the offline stub.
+- Location events share the live IMU event path: coach card, voice, push-to-talk chat context and the trip record.
+- The **LOCATION** indicator shows the permission, GPS and map-tile state.
+
+Current limits:
+- **Foreground only.** Tracking pauses if the app is backgrounded or the screen locks.
+- **Tiles live in memory** for the app session (`MemoryTileStore`), not in a persistent store.
+- **No crowd hotspots** on live drives yet.
 
 **Stop signs and traffic lights ahead** (`featureFilter.ts`): keep features within 200 m and ±35° of the heading. When OSM gives an absolute `direction` (degrees or cardinal), drop features that face a cross street; we read it as the way the sign faces, so a north-facing sign applies to southbound cars. `forward`/`backward` and untagged features are kept, and most OSM stop signs are untagged.
 
