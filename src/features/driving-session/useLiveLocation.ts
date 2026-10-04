@@ -7,6 +7,8 @@ import { createLiveLocationSession } from './createLiveLocationSession';
 import { toGpsFix } from './gpsFix';
 
 const MAP_ERROR_VISIBLE_MS = 60_000;
+/** Log a GPS fix to the console at most this often (the first fix is always logged). */
+const FIX_LOG_INTERVAL_MS = 10_000;
 
 export type LiveLocationStatus = 'idle' | 'requesting' | 'denied' | 'waiting' | 'tracking' | 'error';
 
@@ -59,11 +61,19 @@ export function useLiveLocation(
         }
         setStatus('waiting');
         let primed = false;
+        let lastLoggedAt = 0;
         subscription = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1_000, distanceInterval: 0 },
           (reading) => {
             if (cancelled) return;
             const fix = toGpsFix(reading);
+            if (!primed || fix.t - lastLoggedAt >= FIX_LOG_INTERVAL_MS) {
+              lastLoggedAt = fix.t;
+              console.info(
+                `[live location] fix ${fix.lat.toFixed(6)},${fix.lon.toFixed(6)} ` +
+                  `±${Math.round(reading.coords.accuracy ?? -1)} m, speed ${fix.speed.toFixed(1)} m/s, heading ${Math.round(fix.heading)}`,
+              );
+            }
             if (!primed) {
               primed = true;
               setStatus('tracking');
