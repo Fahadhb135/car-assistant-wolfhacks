@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
 import type { DriveEvent } from '../../core/events/types';
-import { ImuPipeline, MountCalibrationCollector } from '../../core/imu';
+import { ImuPipeline, MountCalibrationCollector, type MotionPeaks } from '../../core/imu';
 import { ReactNativeBleClient, StevalMkboxProSensorSource } from '../../integrations/bluetooth';
 import type { VoiceCoordinator } from '../voice/VoiceCoordinator';
 import { deleteSensorCalibration, loadSensorCalibration, saveSensorCalibration } from './calibrationStore';
@@ -14,6 +14,7 @@ import {
   type DriveEventSink,
 } from './DriveEventGate';
 import { ImuEventRouter } from './ImuEventRouter';
+import { getImuTuning, loadImuTuning, subscribeImuTuning } from './tuningStore';
 
 export type LiveImuStatus = 'idle' | 'connecting' | 'starting' | 'running' | 'error' | 'stopped';
 export type CalibrationStatus = 'loading' | 'collecting' | 'ready' | 'error';
@@ -25,14 +26,18 @@ type Runtime = {
   source: StevalMkboxProSensorSource | null;
   pipeline: ImuPipeline | null;
   calibrationCollector: MountCalibrationCollector | null;
+  unsubscribeTuning?: () => void;
   startup: Promise<void>;
 };
 
 const CALM_AFTER_MS = 8_000;
+/** How often a dev build logs the smoothed motion peaks to Metro, for tuning the thresholds. */
+const MOTION_LOG_INTERVAL_MS = 2_000;
 
 async function dispose(runtime: Runtime): Promise<void> {
   if (runtime.disposed) return;
   runtime.disposed = true;
+  runtime.unsubscribeTuning?.();
   try {
     await runtime.source?.stop();
   } catch {
@@ -60,6 +65,8 @@ export function useLiveImuDrive(
   /** Single gated sink shared by live IMU and location coaching. */
   eventSink: DriveEventSink;
   suppression: DriveEventGateSnapshot;
+  /** Smoothed vehicle-frame extremes over the last couple of seconds, for live tuning. */
+  motion: MotionPeaks | null;
   recalibrate: () => Promise<void>;
   stop: () => Promise<void>;
 }> {
@@ -68,6 +75,7 @@ export function useLiveImuDrive(
   const [calibrationStatus, setCalibrationStatus] = useState<CalibrationStatus>('loading');
   const [calibrationMessage, setCalibrationMessage] = useState('Checking sensor calibration…');
   const [coach, setCoach] = useState<CoachMessage>(CLEAR_ROAD);
+  const [motion, setMotion] = useState<MotionPeaks | null>(null);
   const eventsRef = useRef<DriveEvent[]>([]);
   const runtimeRef = useRef<Runtime | null>(null);
   const calmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -163,6 +171,9 @@ export function useLiveImuDrive(
         const pipeline = new ImuPipeline();
         runtime.source = source;
         runtime.pipeline = pipeline;
+        await loadImuTuning();
+        pipeline.setTuning(getImuTuning());
+        runtime.unsubscribeTuning = subscribeImuTuning(() => pipeline.setTuning(getImuTuning()));
         const savedCalibration = await loadSensorCalibration(deviceId);
         if (runtime.cancelled) return;
         if (savedCalibration) {
@@ -178,9 +189,23 @@ export function useLiveImuDrive(
         const eventRouter = new ImuEventRouter({ eventSink });
 
         setStatus('starting');
+        let nextMotionLogAtMs = 0;
         await source.start(
           (sample) => {
             const result = pipeline.process(sample);
+            if (sample.receivedMonotonicMs >= nextMotionLogAtMs) {
+              nextMotionLogAtMs = sample.receivedMonotonicMs + MOTION_LOG_INTERVAL_MS;
+              const peaks = pipeline.takeMotionPeaks();
+              if (peaks) setMotion(peaks);
+              if (__DEV__ && peaks) {
+                console.log(
+                  `[imu] fwd ${peaks.minimumForwardG.toFixed(2)}..${peaks.maximumForwardG.toFixed(2)} g, `
+                  + `lat ${peaks.maximumLateralG.toFixed(2)} g, yaw ${peaks.maximumYawDps.toFixed(0)}°/s, `
+                  + `tilt ${peaks.maximumTiltRateDps.toFixed(0)}°/s, jerk ${peaks.maximumJerkGps.toFixed(2)} g/s `
+                  + `(rest fwd ${peaks.restingForwardG.toFixed(2)}, lat ${peaks.restingLateralG.toFixed(2)})`,
+                );
+              }
+            }
             if (result.accepted) {
               const collector = runtime.calibrationCollector;
               if (collector) {
@@ -199,7 +224,10 @@ export function useLiveImuDrive(
                 }
               }
             }
-            for (const candidate of result.events) eventRouter.route(candidate);
+            for (const candidate of result.events) {
+              if (__DEV__) console.log(`[imu] ${candidate.kind}`, JSON.stringify(candidate.evidence));
+              eventRouter.route(candidate);
+            }
           },
           (sourceError) => {
             setError(sourceError.message);
@@ -235,6 +263,7 @@ export function useLiveImuDrive(
     eventsRef,
     eventSink,
     suppression,
+    motion,
     recalibrate,
     stop,
   };

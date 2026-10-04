@@ -5,7 +5,12 @@ export class SwerveCandidateDetector {
   private latched = false;
   private lastEventAtMs = Number.NEGATIVE_INFINITY;
 
-  constructor(private readonly config: SwerveDetectorConfig) {}
+  constructor(private config: SwerveDetectorConfig) {}
+
+  /** Swaps thresholds live, keeping in-flight state (episodes, cooldowns, learned resting level). */
+  setConfig(config: SwerveDetectorConfig): void {
+    this.config = config;
+  }
 
   process(features: WindowFeatures): ImuEvent | undefined {
     if (features.rotationAxisDirectionChanges <= this.config.releaseDirectionChanges) this.latched = false;
