@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
 import type { DriveEvent } from '../../core/events/types';
@@ -7,6 +7,12 @@ import { ReactNativeBleClient, StevalMkboxProSensorSource } from '../../integrat
 import type { VoiceCoordinator } from '../voice/VoiceCoordinator';
 import { deleteSensorCalibration, loadSensorCalibration, saveSensorCalibration } from './calibrationStore';
 import { CLEAR_ROAD, coachMessage, type CoachMessage } from './coachMessage';
+import {
+  DriveEventGate,
+  DriveEventRouter,
+  type DriveEventGateSnapshot,
+  type DriveEventSink,
+} from './DriveEventGate';
 import { ImuEventRouter } from './ImuEventRouter';
 
 export type LiveImuStatus = 'idle' | 'connecting' | 'starting' | 'running' | 'error' | 'stopped';
@@ -51,8 +57,9 @@ export function useLiveImuDrive(
   calibrationMessage: string;
   coach: CoachMessage;
   eventsRef: React.MutableRefObject<DriveEvent[]>;
-  /** Adds an event from another live source (e.g. location coaching) to the trip and coach card. */
-  recordEvent: (event: DriveEvent) => void;
+  /** Single gated sink shared by live IMU and location coaching. */
+  eventSink: DriveEventSink;
+  suppression: DriveEventGateSnapshot;
   recalibrate: () => Promise<void>;
   stop: () => Promise<void>;
 }> {
@@ -64,13 +71,24 @@ export function useLiveImuDrive(
   const eventsRef = useRef<DriveEvent[]>([]);
   const runtimeRef = useRef<Runtime | null>(null);
   const calmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const eventRouterRef = useRef<DriveEventRouter | null>(null);
+  const [suppression, setSuppression] = useState<DriveEventGateSnapshot>({
+    quiet: false,
+    quietUntilMonotonicMs: null,
+    quietRemainingMs: 0,
+    admittedCount: 0,
+    suppressedCount: 0,
+    suppressedByKind: {},
+  });
 
-  const recordEvent = useCallback((event: DriveEvent) => {
+  const retainEvent = useCallback((event: DriveEvent) => {
     eventsRef.current.push(event);
     setCoach(coachMessage(event));
     if (calmTimerRef.current) clearTimeout(calmTimerRef.current);
     calmTimerRef.current = setTimeout(() => setCoach(CLEAR_ROAD), CALM_AFTER_MS);
   }, []);
+  const routeEvent = useCallback((event: DriveEvent) => eventRouterRef.current?.route(event) ?? false, []);
+  const eventSink = useMemo<DriveEventSink>(() => ({ route: routeEvent }), [routeEvent]);
 
   const recalibrate = useCallback(async () => {
     const runtime = runtimeRef.current;
@@ -92,6 +110,7 @@ export function useLiveImuDrive(
     await dispose(runtime);
     await runtime.startup.catch(() => undefined);
     if (runtimeRef.current === runtime) runtimeRef.current = null;
+    eventRouterRef.current = null;
     setStatus('stopped');
   }, []);
 
@@ -100,6 +119,14 @@ export function useLiveImuDrive(
     eventsRef.current = [];
     setCoach(CLEAR_ROAD);
     setError(null);
+    const gate = new DriveEventGate();
+    eventRouterRef.current = new DriveEventRouter({
+      gate,
+      voice,
+      onEvent: retainEvent,
+      onDecision: (decision) => setSuppression(decision.state),
+    });
+    setSuppression(gate.snapshot());
     setCalibrationStatus('loading');
     setCalibrationMessage('Checking sensor calibration…');
 
@@ -148,7 +175,7 @@ export function useLiveImuDrive(
           setCalibrationMessage('Park safely. Keep the board still with its X arrow facing forward.');
         }
 
-        const eventRouter = new ImuEventRouter({ voice, onEvent: recordEvent });
+        const eventRouter = new ImuEventRouter({ eventSink });
 
         setStatus('starting');
         await source.start(
@@ -195,8 +222,9 @@ export function useLiveImuDrive(
       if (calmTimerRef.current) clearTimeout(calmTimerRef.current);
       void dispose(runtime).then(() => runtime.startup.catch(() => undefined));
       if (runtimeRef.current === runtime) runtimeRef.current = null;
+      eventRouterRef.current = null;
     };
-  }, [deviceId, enabled, recordEvent, voice]);
+  }, [deviceId, enabled, eventSink, retainEvent, voice]);
 
   return {
     status,
@@ -205,7 +233,8 @@ export function useLiveImuDrive(
     calibrationMessage,
     coach,
     eventsRef,
-    recordEvent,
+    eventSink,
+    suppression,
     recalibrate,
     stop,
   };

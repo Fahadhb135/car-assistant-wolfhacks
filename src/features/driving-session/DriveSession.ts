@@ -5,7 +5,7 @@ import type { SpeedingCoach } from '../../core/location/speeding';
 import type { Region, RegionPrefetcher } from '../../core/location/regionPrefetch';
 import { tilesForFix, type TileKey } from '../../core/location/tiles';
 import type { GpsFix, RoadWay, SpeedLimitWay } from '../../core/location/types';
-import type { VoiceCoordinator } from '../voice/VoiceCoordinator';
+import type { DriveEventSink } from './DriveEventGate';
 
 export type DriveSessionDeps = {
   coach: Pick<LocationCoach, 'update'>;
@@ -31,10 +31,9 @@ export type DriveSessionDeps = {
   speeding?: Pick<SpeedingCoach, 'update'> | null;
   /** Crowd hotspots, if the cloud list was available. */
   hotspots?: { update(fix: GpsFix): DriveEventInput[] } | null;
-  voice: Pick<VoiceCoordinator, 'handleEvent'>;
+  /** The shared per-drive gate and side-effect path used by location and IMU events. */
+  eventSink: DriveEventSink;
   nextId?: () => string;
-  /** Every event, in order, for the UI feed and the trip record. */
-  onEvent?: (event: DriveEvent) => void;
   /** Map-tile loading failures (the drive carries on with whatever is already loaded). */
   onError?: (err: unknown) => void;
 };
@@ -56,7 +55,7 @@ export class DriveSession {
    * would be dropped as stale) and fixes are always processed in order.
    */
   onFix(fix: GpsFix): DriveEvent[] {
-    const { tiles, coach, speeding, hotspots, voice, onEvent, onError } = this.deps;
+    const { tiles, coach, speeding, hotspots, eventSink, onError } = this.deps;
     void tiles.update(fix).catch((err) => onError?.(err));
     this.moveRegion(fix);
     const inputs: DriveEventInput[] = [
@@ -65,11 +64,7 @@ export class DriveSession {
       ...(speeding && tiles.speedLimitsNear ? speeding.update(fix, tiles.speedLimitsNear(fix)) : []),
     ];
     const events = inputs.map((i) => toDriveEvent(i, this.nextId));
-    for (const e of events) {
-      onEvent?.(e);
-      voice.handleEvent(e);
-    }
-    return events;
+    return events.filter((event) => eventSink.route(event));
   }
 
   private moveRegion(fix: GpsFix): void {
