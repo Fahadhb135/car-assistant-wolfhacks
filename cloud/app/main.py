@@ -14,6 +14,8 @@ from .coach import CoachRequest, CoachResponse, coach_line
 from .driver_stats import driver_stats, rows_from_payloads
 from .chat_stream import TextStream, chat_text_stream_from_env, stream_reply
 from .tts import Tts
+from .databricks_reader import DatabricksReader
+from .trip_rows import local_summary, local_trip
 from .databricks_sink import DatabricksSink
 from .hotspots import aggregate_events, events_from_trips, near
 from . import parent as parent_data
@@ -56,6 +58,7 @@ def create_app(
     sink: Optional[DatabricksSink] = None,
     text_stream: Optional[TextStream] = None,
     tts: Optional[Tts] = None,
+    reader: Optional[DatabricksReader] = None,
 ) -> FastAPI:
     app = FastAPI(title="Car Assistant cloud")
     store = TripStore(db_path or os.environ.get("TRIPS_DB") or str(CLOUD_DIR / "data" / "trips.db"))
@@ -84,6 +87,34 @@ def create_app(
             os.environ["DATABRICKS_TOKEN"],
             os.environ.get("DATABRICKS_VOLUME_PATH", "/Volumes/carassistant/default/trips"),
         )
+    if reader is None and os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN"):
+        reader = DatabricksReader(
+            os.environ["DATABRICKS_HOST"],
+            os.environ["DATABRICKS_TOKEN"],
+            os.environ.get("DATABRICKS_VOLUME_PATH", "/Volumes/carassistant/default/trips"),
+            warehouse_id=os.environ.get("DATABRICKS_WAREHOUSE_ID") or None,
+        )
+    # Queue ingest -> analytics after each upload so the dashboard sees new trips (DATABRICKS_AUTO_INGEST=0 to stop).
+    auto_ingest = os.environ.get("DATABRICKS_AUTO_INGEST", "1") != "0"
+    log = logging.getLogger("cloud")
+
+    def sync_and_refresh(trip_id: str) -> None:
+        if push_to_databricks(trip_id) and reader is not None and auto_ingest:
+            try:
+                log.info("databricks ingest for %s: %s", trip_id, reader.queue_refresh())
+            except Exception:
+                log.exception("could not queue the databricks ingest job")
+
+    # Short-lived cache of Databricks reads: {key: (loaded_at, value)}.
+    dash_cache: dict = {}
+
+    def cached(key: str, ttl_s: float, load):
+        hit = dash_cache.get(key)
+        if hit and time.time() - hit[0] < ttl_s:
+            return hit[1]
+        value = load()
+        dash_cache[key] = (time.time(), value)
+        return value
 
     def push_to_databricks(trip_id: str) -> bool:
         trip = store.get_trip(trip_id)
@@ -165,8 +196,54 @@ def create_app(
         created = store.insert_if_new(trip, int(time.time() * 1000))
         if created:
             background.add_task(build_report, trip.tripId)
-            background.add_task(push_to_databricks, trip.tripId)
+            background.add_task(sync_and_refresh, trip.tripId)
         return {"tripId": trip.tripId, "created": created}
+
+    @app.get("/drivers/{driver_id}/trips")
+    def get_driver_trips(driver_id: str, limit: int = 10) -> dict:
+        """The driver's recent trips for the dashboard, from the Databricks `trips` table. Trips the
+        service has but Databricks has not ingested yet are added with pending=true."""
+        limit = max(1, min(limit, 50))
+        mine = [p for p in store.all_trips() if p.get("driverId") == driver_id]
+        source, error, rows = "local", None, []
+        if reader is not None:
+            try:
+                rows = cached(f"trips:{driver_id}:{limit}", 30, lambda: reader.driver_trips(driver_id, limit))
+                source = "databricks"
+            except Exception as exc:
+                error = str(exc)[:200]
+                log.warning("databricks trips unavailable: %s", exc)
+        seen = {r["tripId"] for r in rows}
+        pending = [{**local_trip(p), "pending": True} for p in mine if p["tripId"] not in seen]
+        trips = sorted([{**r, "pending": False} for r in rows] + pending, key=lambda t: t["start"] or 0, reverse=True)
+        return {"source": source, "error": error, "trips": trips[:limit]}
+
+    @app.get("/trips/{trip_id}/summary")
+    def get_trip_summary(trip_id: str) -> dict:
+        """One trip as Databricks ingested it (trip row, every event with where it happened, what the
+        coach said). Falls back to the service's own copy until the ingest job has picked it up."""
+        error = None
+        if reader is not None:
+            try:
+                found = cached(f"summary:{trip_id}", 30, lambda: reader.trip_summary(trip_id))
+                if found is not None:
+                    dash_cache[f"summary:{trip_id}"] = (time.time() + 570, found)  # ingested: stable, keep 10 min
+                    return {"source": "databricks", "pending": False, "error": None, **found}
+            except Exception as exc:
+                error = str(exc)[:200]
+                log.warning("databricks summary unavailable: %s", exc)
+        trip = store.get_trip(trip_id)
+        if trip is None:
+            raise HTTPException(404, "unknown trip")
+        return {"source": "local", "pending": True, "error": error, **local_summary(trip.model_dump())}
+
+    @app.post("/admin/databricks/ingest")
+    def queue_ingest(request: Request, x_admin_token: Optional[str] = Header(default=None)) -> dict:
+        """Queue the ingest -> analytics job now (it also runs after every upload)."""
+        check_admin(request, x_admin_token)
+        if reader is None:
+            raise HTTPException(503, "Databricks not configured")
+        return {"status": reader.queue_refresh()}
 
     @app.get("/trips/{trip_id}/report", response_model=Report)
     def get_report(trip_id: str) -> Report:
